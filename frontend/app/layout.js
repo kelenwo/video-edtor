@@ -1,6 +1,6 @@
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./globals.css";
-import { ReduxProvider } from "../components/providers/ReduxProvider";
+import { ReduxProvider } from "@/components/providers/ReduxProvider";
 
 export const metadata = {
   title: "Video Editor - Next.js",

@@ -1,56 +1,115 @@
 'use client'
 
 import React, { useEffect, useState, useRef } from 'react';
-import { UploadIcon, TextIcon, ImageIcon, VideoIcon, MusicIcon, LayersIcon, SlidersIcon, PlusIcon, ChevronLeftIcon, ChevronRightIcon, AlignLeftIcon, AlignCenterIcon, AlignRightIcon, BoldIcon, ItalicIcon, ClockIcon, TypeIcon, FileTextIcon } from 'lucide-react';
+import {
+  UploadIcon, TextIcon, ImageIcon, VideoIcon, MusicIcon, LayersIcon,
+  PlusIcon, ChevronLeftIcon, ChevronRightIcon, AlignLeftIcon, AlignCenterIcon,
+  AlignRightIcon, BoldIcon, ItalicIcon, ClockIcon, FileTextIcon, XIcon, EyeIcon
+} from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../redux/hooks';
-import { selectMediaItems, selectSelectedItemId, addMediaItem, updateMediaItem, setSelectedItemId } from '../redux/videoEditorSlice';
+import { selectMediaItems, selectSelectedItemId, addMediaItem, updateMediaItem, setSelectedItemId, removeMediaItem } from '../redux/videoEditorSlice';
 
+// Helper component for standardized control sections
+const ControlSection = ({ title, children }: { title: string, children: React.ReactNode }) => (
+    <div className="py-3">
+      <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-1">
+        {title}
+      </h4>
+      <div className="space-y-3">{children}</div>
+    </div>
+);
+
+// Helper component for reusable input fields with labels
+const InputField = ({ label, children }: { label: string, children: React.ReactNode }) => (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      {children}
+    </div>
+);
+
+// Main Sidebar Component
 export const Sidebar = () => {
   const dispatch = useAppDispatch();
   const mediaItems = useAppSelector(selectMediaItems);
   const selectedItemId = useAppSelector(selectSelectedItemId);
-  
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeItem, setActiveItem] = useState('text');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Form state for the selected item
   const [textContent, setTextContent] = useState('');
-  const [textColor, setTextColor] = useState('#ffffff');
+  const [textColor, setTextColor] = useState('#000000');
   const [fontSize, setFontSize] = useState(32);
   const [fontFamily, setFontFamily] = useState('Arial');
   const [textAlign, setTextAlign] = useState<'left' | 'center' | 'right'>('center');
-  const [isBold, setIsBold] = useState(true);
+  const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
-  
-  // Position and size controls
-  const [posX, setPosX] = useState(35);
-  const [posY, setPosY] = useState(30);
-  const [rotation, setRotation] = useState(0);
-  const [width, setWidth] = useState(135);
-  const [height, setHeight] = useState(28);
-  const [radius, setRadius] = useState(0);
+  const [posX, setPosX] = useState(50);
+  const [posY, setPosY] = useState(50);
 
-  // Get selected text item if any
-  const selectedTextItem = selectedItemId ? mediaItems.find(item => item.id === selectedItemId && item.type === 'text') : null;
+  const selectedItem = selectedItemId ? mediaItems.find(item => item.id === selectedItemId) : null;
 
-  // Update text controls when a text item is selected
+  // Update local state when a different item is selected
   useEffect(() => {
-    if (selectedTextItem) {
-      setTextContent(selectedTextItem.content || '');
-      setTextColor(selectedTextItem.fontColor || '#ffffff');
-      setFontSize(selectedTextItem.fontSize || 32);
-      setFontFamily(selectedTextItem.fontFamily || 'Arial');
-      setTextAlign(selectedTextItem.textAlign || 'center');
-      setIsBold(selectedTextItem.fontWeight === 'bold');
-      setIsItalic(selectedTextItem.fontStyle === 'italic');
-      // Set position if available
-      if (selectedTextItem.position) {
-        setPosX(Math.round(selectedTextItem.position.x));
-        setPosY(Math.round(selectedTextItem.position.y));
-      }
+    if (selectedItem?.type === 'text') {
+      setTextContent(selectedItem.content || '');
+      setTextColor(selectedItem.fontColor || '#000000');
+      setFontSize(selectedItem.fontSize || 32);
+      setFontFamily(selectedItem.fontFamily || 'Arial');
+      setTextAlign(selectedItem.textAlign || 'center');
+      setIsBold(selectedItem.fontWeight === 'bold');
+      setIsItalic(selectedItem.fontStyle === 'italic');
+      setPosX(selectedItem.position?.x || 50);
+      setPosY(selectedItem.position?.y || 50);
       setActiveItem('text');
     }
-  }, [selectedTextItem]);
+  }, [selectedItem]);
 
+  const handleUpdate = (updates: Partial<any>) => {
+    if (selectedItemId) {
+      dispatch(updateMediaItem({ id: selectedItemId, updates }));
+    }
+  };
+
+  // Helper function to find the next available track
+  const findAvailableTrack = (newStartTime: number, newEndTime: number): number => {
+    let assignedTrack = 0;
+    let foundTrack = false;
+
+    // Sort media items by track and then by startTime to make finding gaps easier
+    const sortedMediaItems = [...mediaItems].sort((a, b) => {
+      if (a.track !== b.track) return a.track - b.track;
+      return a.startTime - b.startTime;
+    });
+
+    while (!foundTrack) {
+      let overlap = false;
+      for (const existingItem of sortedMediaItems) {
+        if (existingItem.track === assignedTrack) {
+          // Check for overlap: [start1, end1] and [start2, end2] overlap if (start1 < end2 and start2 < end1)
+          if (
+              (newStartTime < existingItem.endTime && newEndTime > existingItem.startTime)
+          ) {
+            overlap = true;
+            break;
+          }
+        }
+      }
+      if (!overlap) {
+        foundTrack = true;
+      } else {
+        assignedTrack++;
+      }
+    }
+    return assignedTrack;
+  };
+
+  /**
+   * Corrected file upload handler.
+   * This function is based on the original, working implementation.
+   * It correctly gets the media duration and uses 'url' instead of 'src'.
+   */
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
@@ -60,56 +119,68 @@ export const Sidebar = () => {
     const url = URL.createObjectURL(file);
 
     if (fileType === 'video') {
-      // Create a temporary video element to get duration
+      // Create a temporary video element to get the actual duration
       const video = document.createElement('video');
       video.src = url;
       video.onloadedmetadata = () => {
+        console.log('Video loaded metadata. Duration:', video.duration); // Debug log
+        const newTrack = findAvailableTrack(0, video.duration); // Find available track
         const newItem = {
           type: 'video' as const,
           name: file.name,
           duration: video.duration,
           startTime: 0,
           endTime: video.duration,
-          track: 0,
-          url: url,
+          track: newTrack, // Assign dynamic track
+          color: '#9d84e8',
+          url: url, // Use 'url' which the player component expects
           isMuted: false
         };
         dispatch(addMediaItem(newItem));
+        setActiveItem('videos');
       };
     } else if (fileType === 'audio') {
-      // Create a temporary audio element to get duration
+      // Create a temporary audio element to get the actual duration
       const audio = document.createElement('audio');
       audio.src = url;
       audio.onloadedmetadata = () => {
+        console.log('Audio loaded metadata. Duration:', audio.duration); // Debug log
+        const newTrack = findAvailableTrack(0, audio.duration); // Find available track
         const newItem = {
           type: 'audio' as const,
           name: file.name,
           duration: audio.duration,
           startTime: 0,
           endTime: audio.duration,
-          track: 2,
-          url: url,
+          track: newTrack, // Assign dynamic track
+          color: '#4caf50',
+          url: url, // Use 'url'
           isMuted: false
         };
         dispatch(addMediaItem(newItem));
+        setActiveItem('audios');
       };
     } else if (fileType === 'image') {
+      const defaultImageDuration = 10; // Default duration for images
+      const newTrack = findAvailableTrack(0, defaultImageDuration); // Find available track
       const newItem = {
         type: 'image' as const,
         name: file.name,
-        duration: 10,
+        duration: defaultImageDuration,
         startTime: 0,
-        endTime: 10,
-        track: 1,
-        url: url,
+        endTime: defaultImageDuration,
+        track: newTrack, // Assign dynamic track
+        url: url, // Use 'url'
         position: {
           x: 50,
           y: 50
         }
       };
       dispatch(addMediaItem(newItem));
+      setActiveItem('photos');
     }
-    // Reset file input
+
+    // Reset file input to allow uploading the same file again
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -123,595 +194,238 @@ export const Sidebar = () => {
   };
 
   const handleAddText = () => {
+    const defaultTextDuration = 10;
+    const newTrack = findAvailableTrack(0, defaultTextDuration); // Find available track
     const newItem = {
       type: 'text' as const,
       name: 'New Text',
-      content: textContent || 'Add your text here',
-      duration: 10,
+      content: 'Your Text Here',
+      duration: defaultTextDuration,
       startTime: 0,
-      endTime: 10,
-      track: 1,
-      position: {
-        x: posX,
-        y: posY
-      },
-      fontSize,
-      fontFamily,
-      fontColor: textColor,
-      fontWeight: isBold ? 'bold' : 'normal',
-      fontStyle: isItalic ? 'italic' : 'normal',
-      textAlign
+      endTime: defaultTextDuration,
+      track: newTrack, // Assign dynamic track
+      position: { x: 50, y: 50 },
+      fontSize: 32,
+      fontFamily: 'Arial',
+      fontColor: '#000000',
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      textAlign: 'center' as const,
     };
     const action = dispatch(addMediaItem(newItem));
     dispatch(setSelectedItemId(action.payload.id));
   };
 
-  const updateSelectedText = () => {
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          content: textContent,
-          fontSize,
-          fontFamily,
-          fontColor: textColor,
-          fontWeight: isBold ? 'bold' : 'normal',
-          fontStyle: isItalic ? 'italic' : 'normal',
-          textAlign,
-          position: {
-            x: posX,
-            y: posY
-          }
-        }
-      }));
-    }
-  };
+  // Reusable list for sidebar navigation
+  const sidebarNavItems = [
+    { id: 'uploads', label: 'Uploads', icon: UploadIcon },
+    { id: 'text', label: 'Text', icon: TextIcon },
+    { id: 'videos', label: 'Videos', icon: VideoIcon },
+    { id: 'audios', label: 'Audios', icon: MusicIcon },
+    { id: 'photos', label: 'Photos', icon: ImageIcon },
+    { id: 'records', label: 'Records', icon: ClockIcon },
+    { id: 'subtitles', label: 'Subtitles', icon: FileTextIcon },
+  ];
 
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
+  const renderMediaList = (type: 'video' | 'audio' | 'image') => {
+    const filteredItems = mediaItems.filter(item => item.type === type);
 
-  // Handle text style changes
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setTextContent(e.target.value);
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          content: e.target.value
-        }
-      }));
-    }
-  };
+    const handleRemoveItem = (e: React.MouseEvent, id: string) => {
+      e.stopPropagation(); // Prevent the parent div's onClick from firing
+      dispatch(removeMediaItem(id));
+    };
 
-  const handleFontSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const size = parseInt(e.target.value);
-    setFontSize(size);
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          fontSize: size
-        }
-      }));
+    if (filteredItems.length === 0) {
+      return <div className="text-center text-gray-500 pt-10 text-sm">No {type}s uploaded.</div>
     }
-  };
+    return (
+        <div className="space-y-2">
+          {filteredItems.map(item => (
+              <div
+                  key={item.id}
+                  className={`group relative p-2 rounded-md text-sm cursor-pointer flex items-center justify-between ${selectedItemId === item.id ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-500' : 'bg-gray-100 hover:bg-gray-200'}`}
+                  onClick={() => dispatch(setSelectedItemId(item.id))}
+              >
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  {item.type === 'image' && item.url ? (
+                      <img src={item.url} alt={item.name} className="w-10 h-10 object-cover rounded-md bg-gray-200 flex-shrink-0" />
+                  ) : (
+                      <div className="w-10 h-10 flex-shrink-0 flex items-center justify-center bg-gray-200 rounded-md">
+                        {item.type === 'video' && <VideoIcon className="w-5 h-5 text-gray-500" />}
+                        {item.type === 'audio' && <MusicIcon className="w-5 h-5 text-gray-500" />}
+                      </div>
+                  )}
+                  <span className="truncate">{item.name}</span> <button
+                    onClick={(e) => handleRemoveItem(e, item.id)}
+                    className="p-1 text-red-600 hover:text-red-500"
+                    title="Delete"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+                </div>
 
-  const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setTextColor(e.target.value);
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          fontColor: e.target.value
-        }
-      }));
-    }
-  };
-
-  const handleFontFamilyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFontFamily(e.target.value);
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          fontFamily: e.target.value
-        }
-      }));
-    }
-  };
-
-  const handleTextAlign = (align: 'left' | 'center' | 'right') => {
-    setTextAlign(align);
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          textAlign: align
-        }
-      }));
-    }
-  };
-
-  const toggleBold = () => {
-    const newValue = !isBold;
-    setIsBold(newValue);
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          fontWeight: newValue ? 'bold' : 'normal'
-        }
-      }));
-    }
-  };
-
-  const toggleItalic = () => {
-    const newValue = !isItalic;
-    setIsItalic(newValue);
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          fontStyle: newValue ? 'italic' : 'normal'
-        }
-      }));
-    }
-  };
-
-  const handlePositionChange = (axis: 'x' | 'y', value: number) => {
-    if (axis === 'x') {
-      setPosX(value);
-    } else {
-      setPosY(value);
-    }
-    if (selectedTextItem) {
-      dispatch(updateMediaItem({
-        id: selectedTextItem.id,
-        updates: {
-          position: {
-            x: axis === 'x' ? value : posX,
-            y: axis === 'y' ? value : posY
-          }
-        }
-      }));
-    }
-  };
-
-  const handleRotationChange = (value: number) => {
-    setRotation(value);
-    // Would need to add rotation support to the MediaItem type and VideoPreview component
-  };
-
-  // Input file reference
-  const handleFileInputRef = (type: 'video' | 'audio' | 'image') => {
-    if (fileInputRef.current) {
-      fileInputRef.current.accept = type === 'video' ? 'video/*' : type === 'audio' ? 'audio/*' : 'image/*';
-      fileInputRef.current.click();
-    }
-  };
+                <div className="d-none absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-white/80 backdrop-blur-sm rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                  <button className="p-1 text-gray-500 hover:text-blue-600" title="Preview">
+                    <EyeIcon className="w-4 h-4" />
+                  </button>
+                  <button
+                      onClick={(e) => handleRemoveItem(e, item.id)}
+                      className="p-1 text-red-300 hover:text-red-500"
+                      title="Delete"
+                  >
+                    <XIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+          ))}
+        </div>
+    )
+  }
 
   return (
-    <div className="flex h-full">
-      {/* Main vertical sidebar with icons */}
-      <div className="w-16 bg-white border-r border-gray-200 flex flex-col items-center py-4">
-        <div className="mb-6">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-            <LayersIcon size={20} className="text-white" />
+      <div className="flex h-full bg-gray-50">
+        {/* Main Vertical Sidebar */}
+        <div className="w-24 bg-white border-r border-gray-200 flex flex-col items-center py-4">
+          <div className="mb-6">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+              <LayersIcon size={20} className="text-white" />
+            </div>
+          </div>
+          <div className="flex flex-col space-y-2 items-center w-full px-2">
+            {sidebarNavItems.map(item => (
+                <button
+                    key={item.id}
+                    className={`flex flex-col items-center justify-center w-full h-16 rounded-lg transition-colors duration-200 ${
+                        activeItem === item.id ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
+                    onClick={() => setActiveItem(item.id)}
+                >
+                  <item.icon size={20} />
+                  <span className="text-xs mt-1 font-medium">{item.label}</span>
+                </button>
+            ))}
           </div>
         </div>
-        <div className="flex flex-col space-y-6 items-center">
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'add' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('add')}
-          >
-            <PlusIcon size={20} />
-            <span className="text-xs mt-1 block">Add</span>
-          </button>
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'uploads' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('uploads')}
-          >
-            <UploadIcon size={20} />
-            <span className="text-xs mt-1 block">Uploads</span>
-          </button>
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'text' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('text')}
-          >
-            <TextIcon size={20} />
-            <span className="text-xs mt-1 block">Text</span>
-          </button>
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'videos' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('videos')}
-          >
-            <VideoIcon size={20} />
-            <span className="text-xs mt-1 block">Videos</span>
-          </button>
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'audios' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('audios')}
-          >
-            <MusicIcon size={20} />
-            <span className="text-xs mt-1 block">Audios</span>
-          </button>
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'photos' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('photos')}
-          >
-            <ImageIcon size={20} />
-            <span className="text-xs mt-1 block">Photos</span>
-          </button>
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'records' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('records')}
-          >
-            <ClockIcon size={20} />
-            <span className="text-xs mt-1 block">Records</span>
-          </button>
-          <button 
-            className={`p-2 rounded-lg ${activeItem === 'subtitles' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
-            onClick={() => setActiveItem('subtitles')}
-          >
-            <FileTextIcon size={20} />
-            <span className="text-xs mt-1 block">Subtitles</span>
-          </button>
-        </div>
-      </div>
 
-      {/* Content sidebar that changes based on selected item */}
-      {sidebarOpen && (
-        <div className="w-64 bg-white text-gray-900 flex flex-col border-r border-gray-200">
-                      <div className="flex items-center justify-between p-3 border-b border-gray-200">
-            <h3 className="font-medium">
-              {activeItem === 'add' && 'Add'}
-              {activeItem === 'uploads' && 'Uploads'}
-              {activeItem === 'text' && 'Text'}
-              {activeItem === 'videos' && 'Videos'}
-              {activeItem === 'audios' && 'Audios'}
-              {activeItem === 'photos' && 'Photos'}
-              {activeItem === 'records' && 'Records'}
-              {activeItem === 'subtitles' && 'Subtitles'}
-            </h3>
-            <button onClick={toggleSidebar} className="p-1 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100">
-              <ChevronLeftIcon size={18} />
-            </button>
-          </div>
-
-          {/* Hidden file input */}
-          <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-
-          <div className="flex-1 overflow-y-auto p-3">
-            {activeItem === 'add' && (
-              <div className="space-y-4">
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                  <UploadIcon size={24} className="mx-auto mb-2 text-gray-500" />
-                  <p className="text-sm text-gray-600">
-                    Drag & drop or click to upload
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Video, Audio, or Images
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button className="flex flex-col items-center p-3 bg-gray-700 rounded-lg hover:bg-gray-600" onClick={() => triggerFileUpload('video')}>
-                    <VideoIcon size={20} className="text-blue-400 mb-1" />
-                    <span className="text-xs">Video</span>
-                  </button>
-                  <button className="flex flex-col items-center p-3 bg-gray-700 rounded-lg hover:bg-gray-600" onClick={() => triggerFileUpload('image')}>
-                    <ImageIcon size={20} className="text-green-400 mb-1" />
-                    <span className="text-xs">Image</span>
-                  </button>
-                  <button className="flex flex-col items-center p-3 bg-gray-700 rounded-lg hover:bg-gray-600" onClick={() => triggerFileUpload('audio')}>
-                    <MusicIcon size={20} className="text-purple-400 mb-1" />
-                    <span className="text-xs">Audio</span>
-                  </button>
-                  <button className="flex flex-col items-center p-3 bg-gray-700 rounded-lg hover:bg-gray-600" onClick={() => setActiveItem('text')}>
-                    <TextIcon size={20} className="text-orange-400 mb-1" />
-                    <span className="text-xs">Text</span>
-                  </button>
-                </div>
+        {/* Collapsible Content Sidebar */}
+        {sidebarOpen && (
+            <div className="w-80 bg-white text-gray-900 flex flex-col border-r border-gray-200 transition-all duration-300">
+              <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                <h3 className="font-semibold text-lg capitalize">{activeItem}</h3>
+                <button onClick={() => setSidebarOpen(false)} className="p-1 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100">
+                  <ChevronLeftIcon size={18} />
+                </button>
               </div>
-            )}
 
-            {activeItem === 'text' && (
-              <div className="space-y-4">
-                <h4 className="text-xs font-medium text-gray-400 uppercase">
-                  Align
-                </h4>
-                <div className="flex justify-center p-3 bg-gray-700 rounded-lg mb-4">
-                  <div className="flex border border-gray-600 rounded overflow-hidden">
-                    <button className={`p-1.5 ${textAlign === 'left' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => handleTextAlign('left')}>
-                      <AlignLeftIcon size={16} className="text-white" />
-                    </button>
-                    <button className={`p-1.5 ${textAlign === 'center' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => handleTextAlign('center')}>
-                      <AlignCenterIcon size={16} className="text-white" />
-                    </button>
-                    <button className={`p-1.5 ${textAlign === 'right' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => handleTextAlign('right')}>
-                      <AlignRightIcon size={16} className="text-white" />
-                    </button>
-                  </div>
-                </div>
+              <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
 
-                <h4 className="text-xs font-medium text-gray-400 uppercase">
-                  Position
-                </h4>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      X
-                    </label>
-                    <input type="number" value={posX} onChange={e => handlePositionChange('x', parseInt(e.target.value))} className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      Y
-                    </label>
-                    <input type="number" value={posY} onChange={e => handlePositionChange('y', parseInt(e.target.value))} className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      θ
-                    </label>
-                    <input type="number" value={rotation} onChange={e => handleRotationChange(parseInt(e.target.value))} className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white" />
-                  </div>
-                </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                {activeItem === 'uploads' && (
+                    <ControlSection title="Upload Media">
+                      <button onClick={() => triggerFileUpload('video')} className="w-full flex items-center justify-center space-x-2 py-2.5 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700">
+                        <VideoIcon size={16} />
+                        <span>Upload Video</span>
+                      </button>
+                      <button onClick={() => triggerFileUpload('audio')} className="w-full flex items-center justify-center space-x-2 py-2.5 bg-green-600 text-white rounded-md text-sm font-semibold hover:bg-green-700">
+                        <MusicIcon size={16} />
+                        <span>Upload Audio</span>
+                      </button>
+                      <button onClick={() => triggerFileUpload('image')} className="w-full flex items-center justify-center space-x-2 py-2.5 bg-purple-600 text-white rounded-md text-sm font-semibold hover:bg-purple-700">
+                        <ImageIcon size={16} />
+                        <span>Upload Image</span>
+                      </button>
+                    </ControlSection>
+                )}
 
-                <h4 className="text-xs font-medium text-gray-400 uppercase">
-                  Size
-                </h4>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      W
-                    </label>
-                    <input type="number" value={width} onChange={e => setWidth(parseInt(e.target.value))} className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      H
-                    </label>
-                    <input type="number" value={height} onChange={e => setHeight(parseInt(e.target.value))} className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white" />
-                  </div>
-                  <div className="flex items-end">
-                    <button className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white">
-                      <PlusIcon size={16} />
-                    </button>
-                  </div>
-                </div>
+                {activeItem === 'videos' && renderMediaList('video')}
+                {activeItem === 'audios' && renderMediaList('audio')}
+                {activeItem === 'photos' && renderMediaList('image')}
 
-                <h4 className="text-xs font-medium text-gray-400 uppercase">
-                  Radius
-                </h4>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">L</label>
-                  <input type="number" value={radius} onChange={e => setRadius(parseInt(e.target.value))} className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white" />
-                </div>
+                {activeItem === 'text' && (
+                    <div className="divide-y divide-gray-200">
+                      <ControlSection title="Content">
+                                    <textarea
+                                        value={textContent}
+                                        onChange={(e) => {
+                                          setTextContent(e.target.value);
+                                          handleUpdate({ content: e.target.value });
+                                        }}
+                                        placeholder="Your text here"
+                                        className="w-full h-24 p-2 bg-white border border-gray-300 rounded-md text-sm resize-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                        <button onClick={handleAddText} className="w-full mt-2 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold hover:bg-blue-700">
+                          Add New Text
+                        </button>
+                      </ControlSection>
 
-                <h4 className="text-xs font-medium text-gray-400 uppercase">
-                  Text
-                </h4>
-                <textarea value={textContent} onChange={handleTextChange} placeholder="Enter your text here" className="w-full h-20 p-2 bg-gray-700 border border-gray-600 rounded-md text-sm resize-none text-white" />
-                <div className="flex flex-wrap gap-2">
-                  <button className={`p-1.5 rounded ${isBold ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={toggleBold}>
-                    <BoldIcon size={16} className="text-white" />
-                  </button>
-                  <button className={`p-1.5 rounded ${isItalic ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={toggleItalic}>
-                    <ItalicIcon size={16} className="text-white" />
-                  </button>
-                </div>
+                      <ControlSection title="Typography">
+                        <InputField label="Font Family">
+                          <select value={fontFamily} onChange={(e) => { setFontFamily(e.target.value); handleUpdate({ fontFamily: e.target.value }); }} className="w-full p-2 bg-white border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+                            <option>Arial</option>
+                            <option>Helvetica</option>
+                            <option>Georgia</option>
+                            <option>Verdana</option>
+                          </select>
+                        </InputField>
+                        <div className="flex items-center space-x-2">
+                          <button className={`p-2 rounded-md border ${isBold ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white border-gray-300 hover:bg-gray-100'}`} onClick={() => { const newV = !isBold; setIsBold(newV); handleUpdate({ fontWeight: newV ? 'bold' : 'normal' }); }}>
+                            <BoldIcon size={16} />
+                          </button>
+                          <button className={`p-2 rounded-md border ${isItalic ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white border-gray-300 hover:bg-gray-100'}`} onClick={() => { const newV = !isItalic; setIsItalic(newV); handleUpdate({ fontStyle: newV ? 'italic' : 'normal' }); }}>
+                            <ItalicIcon size={16} />
+                          </button>
+                        </div>
+                        <InputField label={`Font Size: ${fontSize}px`}>
+                          <input type="range" min="12" max="120" value={fontSize} onChange={(e) => { const size = parseInt(e.target.value); setFontSize(size); handleUpdate({ fontSize: size }); }} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                        </InputField>
+                      </ControlSection>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      Font Family
-                    </label>
-                    <select value={fontFamily} onChange={handleFontFamilyChange} className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md text-sm text-white">
-                      <option value="Arial">Arial</option>
-                      <option value="Helvetica">Helvetica</option>
-                      <option value="Times New Roman">Times New Roman</option>
-                      <option value="Courier New">Courier New</option>
-                      <option value="Georgia">Georgia</option>
-                      <option value="Verdana">Verdana</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      Font Size: {fontSize}px
-                    </label>
-                    <input type="range" min="12" max="72" value={fontSize} onChange={handleFontSizeChange} className="w-full" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">
-                      Text Color
-                    </label>
-                    <div className="flex items-center">
-                      <input type="color" value={textColor} onChange={handleColorChange} className="mr-2 w-8 h-8 rounded overflow-hidden" />
-                      <input type="text" value={textColor} onChange={handleColorChange} className="flex-1 p-1 bg-gray-700 border border-gray-600 rounded text-sm text-white" />
+                      <ControlSection title="Appearance">
+                        <InputField label="Text Color">
+                          <div className="flex items-center space-x-2">
+                            <input type="color" value={textColor} onChange={(e) => { setTextColor(e.target.value); handleUpdate({ fontColor: e.target.value }); }} className="p-1 h-10 w-10 block bg-white border border-gray-300 cursor-pointer rounded-lg" />
+                            <input type="text" value={textColor} onChange={(e) => { setTextColor(e.target.value); handleUpdate({ fontColor: e.target.value }); }} className="w-full p-2 bg-white border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
+                          </div>
+                        </InputField>
+                        <InputField label="Alignment">
+                          <div className="flex w-full border border-gray-300 rounded-md overflow-hidden">
+                            <button className={`flex-1 p-2 text-gray-600 ${textAlign === 'left' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`} onClick={() => { setTextAlign('left'); handleUpdate({ textAlign: 'left' }); }}>
+                              <AlignLeftIcon size={16} className="mx-auto" />
+                            </button>
+                            <button className={`flex-1 p-2 text-gray-600 border-l border-r border-gray-300 ${textAlign === 'center' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`} onClick={() => { setTextAlign('center'); handleUpdate({ textAlign: 'center' }); }}>
+                              <AlignCenterIcon size={16} className="mx-auto" />
+                            </button>
+                            <button className={`flex-1 p-2 text-gray-600 ${textAlign === 'right' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`} onClick={() => { setTextAlign('right'); handleUpdate({ textAlign: 'right' }); }}>
+                              <AlignRightIcon size={16} className="mx-auto" />
+                            </button>
+                          </div>
+                        </InputField>
+                      </ControlSection>
+
+                      <ControlSection title="Transform">
+                        <div className="grid grid-cols-2 gap-3">
+                          <InputField label="Position X">
+                            <input type="number" value={posX} onChange={e => { const val = parseInt(e.target.value); setPosX(val); handleUpdate({ position: { x: val, y: posY } }); }} className="w-full p-2 bg-white border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
+                          </InputField>
+                          <InputField label="Position Y">
+                            <input type="number" value={posY} onChange={e => { const val = parseInt(e.target.value); setPosY(val); handleUpdate({ position: { x: posX, y: val } }); }} className="w-full p-2 bg-white border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500" />
+                          </InputField>
+                        </div>
+                      </ControlSection>
                     </div>
-                  </div>
-                </div>
-
-                {selectedTextItem ? (
-                  <button onClick={updateSelectedText} className="w-full py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
-                    Update Text
-                  </button>
-                ) : (
-                  <button onClick={handleAddText} className="w-full py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
-                    Add Text
-                  </button>
                 )}
               </div>
-            )}
+            </div>
+        )}
 
-            {activeItem === 'videos' && (
-              <div className="space-y-4">
-                <button className="w-full py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 flex items-center justify-center" onClick={() => handleFileInputRef('video')}>
-                  <UploadIcon size={16} className="mr-2" />
-                  Upload Video
-                </button>
-                <div className="mt-4">
-                  <h4 className="text-xs font-medium text-gray-400 uppercase mb-2">
-                    Your Videos
-                  </h4>
-                  <div className="space-y-2">
-                    {mediaItems.filter(item => item.type === 'video').map(video => (
-                      <div key={video.id} className={`p-2 rounded-md cursor-pointer ${selectedItemId === video.id ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => dispatch(setSelectedItemId(video.id))}>
-                        <div className="flex items-center">
-                          <VideoIcon size={16} className="mr-2 text-gray-400" />
-                          <span className="text-sm truncate">
-                            {video.name}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                    {mediaItems.filter(item => item.type === 'video').length === 0 && (
-                      <div className="text-center py-4 text-gray-500 text-sm">
-                        No videos added yet
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeItem === 'audios' && (
-              <div className="space-y-4">
-                <button className="w-full py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 flex items-center justify-center" onClick={() => handleFileInputRef('audio')}>
-                  <UploadIcon size={16} className="mr-2" />
-                  Upload Audio
-                </button>
-                <div className="mt-4">
-                  <h4 className="text-xs font-medium text-gray-400 uppercase mb-2">
-                    Your Audio Files
-                  </h4>
-                  <div className="space-y-2">
-                    {mediaItems.filter(item => item.type === 'audio').map(audio => (
-                      <div key={audio.id} className={`p-2 rounded-md cursor-pointer ${selectedItemId === audio.id ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => dispatch(setSelectedItemId(audio.id))}>
-                        <div className="flex items-center">
-                          <MusicIcon size={16} className="mr-2 text-gray-400" />
-                          <span className="text-sm truncate">
-                            {audio.name}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                    {mediaItems.filter(item => item.type === 'audio').length === 0 && (
-                      <div className="text-center py-4 text-gray-500 text-sm">
-                        No audio files added yet
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeItem === 'photos' && (
-              <div className="space-y-4">
-                <button className="w-full py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 flex items-center justify-center" onClick={() => handleFileInputRef('image')}>
-                  <UploadIcon size={16} className="mr-2" />
-                  Upload Photo
-                </button>
-                <div className="mt-4">
-                  <h4 className="text-xs font-medium text-gray-400 uppercase mb-2">
-                    Your Photos
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    {mediaItems.filter(item => item.type === 'image').map(image => (
-                      <div key={image.id} className={`aspect-square rounded-md overflow-hidden cursor-pointer ${selectedItemId === image.id ? 'ring-2 ring-blue-500' : ''}`} onClick={() => dispatch(setSelectedItemId(image.id))}>
-                        <img src={image.url} alt={image.name} className="w-full h-full object-cover" />
-                      </div>
-                    ))}
-                  </div>
-                  {mediaItems.filter(item => item.type === 'image').length === 0 && (
-                    <div className="text-center py-4 text-gray-500 text-sm">
-                      No photos added yet
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {activeItem === 'records' && (
-              <div className="space-y-4">
-                <div className="text-center py-4">
-                  <ClockIcon size={32} className="mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm text-gray-300">
-                    Record your screen or camera
-                  </p>
-                  <button className="mt-4 py-2 px-4 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
-                    Start Recording
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeItem === 'subtitles' && (
-              <div className="space-y-4">
-                <div className="text-center py-4">
-                  <FileTextIcon size={32} className="mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm text-gray-300">
-                    Add subtitles to your video
-                  </p>
-                  <div className="mt-4 space-y-2">
-                    <button className="w-full py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
-                      Auto-generate Subtitles
-                    </button>
-                    <button className="w-full py-2 bg-gray-700 text-white rounded-md text-sm hover:bg-gray-600">
-                      Upload Subtitle File
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeItem === 'uploads' && (
-              <div className="space-y-4">
-                <div className="border-2 border-dashed border-gray-600 rounded-lg p-4 text-center hover:border-blue-500 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                  <UploadIcon size={24} className="mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm text-gray-300">
-                    Drag & drop or click to upload
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Video, Audio, or Images
-                  </p>
-                </div>
-                <div className="mt-4">
-                  <h4 className="text-xs font-medium text-gray-400 uppercase mb-2">
-                    Recent Uploads
-                  </h4>
-                  <div className="space-y-2">
-                    {mediaItems.slice(0, 5).map(item => (
-                      <div key={item.id} className={`p-2 rounded-md cursor-pointer ${selectedItemId === item.id ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`} onClick={() => dispatch(setSelectedItemId(item.id))}>
-                        <div className="flex items-center">
-                          {item.type === 'video' && <VideoIcon size={16} className="mr-2 text-gray-400" />}
-                          {item.type === 'audio' && <MusicIcon size={16} className="mr-2 text-gray-400" />}
-                          {item.type === 'image' && <ImageIcon size={16} className="mr-2 text-gray-400" />}
-                          {item.type === 'text' && <TextIcon size={16} className="mr-2 text-gray-400" />}
-                          <span className="text-sm truncate">{item.name}</span>
-                        </div>
-                      </div>
-                    ))}
-                    {mediaItems.length === 0 && (
-                      <div className="text-center py-4 text-gray-500 text-sm">
-                        No uploads yet
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Toggle button when sidebar is closed */}
-      {!sidebarOpen && (
-        <button onClick={toggleSidebar} className="p-2 bg-white hover:bg-gray-100 text-gray-600 hover:text-gray-900 rounded-r-md border border-l-0 border-gray-200">
-          <ChevronRightIcon size={20} />
-        </button>
-      )}
-    </div>
+        {/* Toggle button when sidebar is closed */}
+        {!sidebarOpen && (
+            <div className="flex items-start pt-4">
+              <button onClick={() => setSidebarOpen(true)} className="p-2 bg-white hover:bg-gray-100 text-gray-600 hover:text-gray-900 rounded-r-md border border-l-0 border-gray-200">
+                <ChevronRightIcon size={20} />
+              </button>
+            </div>
+        )}
+      </div>
   );
 };
