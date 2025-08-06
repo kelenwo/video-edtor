@@ -32,6 +32,7 @@ export const VideoPreview = () => {
     x: 0,
     y: 0
   });
+  const [workspaceSize, setWorkspaceSize] = useState<'small' | 'medium' | 'large' | 'fullscreen'>('medium');
 
   // Format time as MM:SS.MS
   const formatTime = (time: number) => {
@@ -151,12 +152,60 @@ export const VideoPreview = () => {
     };
   }, [isDraggingText, activeTextItem, dispatch]);
 
+  // Get workspace dimensions based on size
+  const getWorkspaceDimensions = () => {
+    switch (workspaceSize) {
+      case 'small':
+        return { width: '480px', height: '270px' };
+      case 'medium':
+        return { width: '640px', height: '360px' };
+      case 'large':
+        return { width: '960px', height: '540px' };
+      case 'fullscreen':
+        return { width: '100%', height: '100%' };
+      default:
+        return { width: '640px', height: '360px' };
+    }
+  };
+
+  const workspaceDimensions = getWorkspaceDimensions();
+
   // Get the main video if available
   const mainVideo = activeVideoItems[0];
 
   return (
     <div className="flex-1 flex flex-col p-4 min-h-0">
-      <div ref={previewRef} className="relative flex-1 bg-black rounded-lg flex items-center justify-center overflow-hidden">
+      {/* Workspace Controls */}
+      <div className="flex items-center justify-between mb-4 px-2">
+        <div className="flex items-center space-x-2">
+          <span className="text-sm font-medium text-gray-700">Workspace:</span>
+          <select 
+            value={workspaceSize} 
+            onChange={(e) => setWorkspaceSize(e.target.value as any)}
+            className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="small">Small (480×270)</option>
+            <option value="medium">Medium (640×360)</option>
+            <option value="large">Large (960×540)</option>
+            <option value="fullscreen">Fullscreen</option>
+          </select>
+        </div>
+        <div className="text-sm text-gray-500">
+          {workspaceSize === 'fullscreen' ? 'Fullscreen' : workspaceDimensions.width + ' × ' + workspaceDimensions.height}
+        </div>
+      </div>
+
+      <div 
+        ref={previewRef} 
+        className={`relative bg-black rounded-lg flex items-center justify-center overflow-hidden ${
+          workspaceSize === 'fullscreen' ? 'flex-1' : ''
+        }`}
+        style={workspaceSize !== 'fullscreen' ? {
+          width: workspaceDimensions.width,
+          height: workspaceDimensions.height,
+          margin: '0 auto'
+        } : {}}
+      >
         {/* Video element */}
         {mainVideo ? (
           <video 

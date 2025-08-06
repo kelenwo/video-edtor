@@ -9,6 +9,7 @@ import {
   selectSelectedItemId,
   selectShowTrimControls,
   selectTrimItemId,
+  selectIsPlaying,
   setCurrentTime,
   setSelectedItemId,
   updateMediaItem,
@@ -25,8 +26,10 @@ export const Timeline = () => {
   const selectedItemId = useAppSelector(selectSelectedItemId);
   const showTrimControls = useAppSelector(selectShowTrimControls);
   const trimItemId = useAppSelector(selectTrimItemId);
+  const isPlaying = useAppSelector(selectIsPlaying);
   
   const timelineRef = useRef<HTMLDivElement>(null);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState<'playhead' | 'trimStart' | 'trimEnd' | 'move' | null>(null);
@@ -46,14 +49,14 @@ export const Timeline = () => {
   const pixelsPerSecond = 100 * zoom;
 
   // Convert time to position
-  const timeToPosition = (time: number) => {
+  const timeToPosition = React.useCallback((time: number) => {
     return time * pixelsPerSecond;
-  };
+  }, [pixelsPerSecond]);
 
   // Convert position to time
-  const positionToTime = (position: number) => {
+  const positionToTime = React.useCallback((position: number) => {
     return position / pixelsPerSecond;
-  };
+  }, [pixelsPerSecond]);
 
   // Handle timeline click to set playhead
   const handleTimelineClick = (e: React.MouseEvent) => {
@@ -149,7 +152,35 @@ export const Timeline = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragStartX, dragStartTime, dragType, dragItem, duration, mediaItems, currentTime, dispatch]);
+  }, [isDragging, dragStartX, dragStartTime, dragType, dragItem, duration, mediaItems, currentTime, dispatch, positionToTime]);
+
+  // Auto-scroll timeline to follow playhead during playback
+  useEffect(() => {
+    if (isPlaying && timelineScrollRef.current && !isDragging) {
+      const playheadPosition = timeToPosition(currentTime);
+      const scrollContainer = timelineScrollRef.current;
+      const containerWidth = scrollContainer.clientWidth;
+      const scrollLeft = scrollContainer.scrollLeft;
+      
+      // Calculate if playhead is outside visible area
+      const playheadOffset = playheadPosition - scrollLeft;
+      
+      // Auto-scroll if playhead is near the edges or outside view
+      if (playheadOffset > containerWidth - 100) {
+        // Scroll right to keep playhead in view
+        scrollContainer.scrollTo({
+          left: playheadPosition - containerWidth / 2,
+          behavior: 'smooth'
+        });
+      } else if (playheadOffset < 100 && scrollLeft > 0) {
+        // Scroll left to keep playhead in view
+        scrollContainer.scrollTo({
+          left: Math.max(0, playheadPosition - containerWidth / 2),
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [currentTime, isPlaying, isDragging, timeToPosition]);
 
   // Group media items by track
   const trackItems: Record<number, typeof mediaItems> = {};
@@ -318,7 +349,7 @@ export const Timeline = () => {
         </div>
       )}
 
-      <div className="flex-1 overflow-x-auto overflow-y-hidden relative">
+      <div ref={timelineScrollRef} className="flex-1 overflow-x-auto overflow-y-hidden relative">
         {/* Time ruler */}
         <div className="sticky top-0 h-6 bg-gray-50 border-b border-gray-200 flex items-end z-10">
           {timeMarkers.map(time => (
