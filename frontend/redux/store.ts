@@ -1,8 +1,12 @@
 import { configureStore } from '@reduxjs/toolkit'
-
+import projectsReducer from './projectsSlice'
+import videoEditorReducer from './videoEditorSlice'
 
 export const store = configureStore({
-    reducer: {}
+    reducer: {
+        projects: projectsReducer,
+        videoEditor: videoEditorReducer
+    }
 })
 
 // Infer the `RootState`,  `AppDispatch`, and `AppStore` types from the store itself
