@@ -7,11 +7,15 @@ import {
   selectDuration, 
   selectMediaItems, 
   selectSelectedItemId,
+  selectShowTrimControls,
+  selectTrimItemId,
   setCurrentTime,
   setSelectedItemId,
-  updateMediaItem 
+  updateMediaItem,
+  setShowTrimControls,
+  setTrimItemId
 } from '../redux/videoEditorSlice';
-import { ZoomInIcon, ZoomOutIcon, ScissorsIcon, VolumeIcon, Volume2Icon, VolumeXIcon, TextIcon, ImageIcon, PlusIcon, XIcon, VideoIcon } from 'lucide-react';
+import { ZoomInIcon, ZoomOutIcon, ScissorsIcon, VolumeIcon, Volume2Icon, VolumeXIcon, TextIcon, ImageIcon, PlusIcon, XIcon } from 'lucide-react';
 
 export const Timeline = () => {
   const dispatch = useAppDispatch();
@@ -19,11 +23,18 @@ export const Timeline = () => {
   const duration = useAppSelector(selectDuration);
   const mediaItems = useAppSelector(selectMediaItems);
   const selectedItemId = useAppSelector(selectSelectedItemId);
+  const showTrimControls = useAppSelector(selectShowTrimControls);
+  const trimItemId = useAppSelector(selectTrimItemId);
   
   const timelineRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragType, setDragType] = useState<'playhead' | 'move' | null>(null);
+  const [dragType, setDragType] = useState<'playhead' | 'trimStart' | 'trimEnd' | 'move' | null>(null);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [dragStartTime, setDragStartTime] = useState(0);
+  const [dragItem, setDragItem] = useState<string | null>(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
 
   // Time markers
   const timeMarkers = [];
@@ -55,117 +66,341 @@ export const Timeline = () => {
     }
   };
 
-  // Format time display
-  const formatTime = (time: number) => {
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  // Handle start dragging
+  const handleMouseDown = (e: React.MouseEvent, type: 'playhead' | 'trimStart' | 'trimEnd' | 'move', itemId?: string) => {
+    e.stopPropagation();
+    setIsDragging(true);
+    setDragType(type);
+    setDragStartX(e.clientX);
+
+    if (type === 'playhead') {
+      setDragStartTime(currentTime);
+    } else if (itemId) {
+      setDragItem(itemId);
+      dispatch(setSelectedItemId(itemId));
+      const item = mediaItems.find(i => i.id === itemId);
+      if (item) {
+        if (type === 'trimStart') {
+          setDragStartTime(item.startTime);
+        } else if (type === 'trimEnd') {
+          setDragStartTime(item.endTime);
+        } else if (type === 'move') {
+          setDragStartTime(item.startTime);
+        }
+      }
+    }
   };
 
-  // Handle media item selection
-  const handleItemClick = (itemId: string) => {
-    dispatch(setSelectedItemId(itemId));
+  // Handle mouse move
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging || !timelineRef.current) return;
+
+      const rect = timelineRef.current.getBoundingClientRect();
+      const deltaX = e.clientX - dragStartX;
+      const deltaTime = positionToTime(deltaX);
+
+      if (dragType === 'playhead') {
+        const newTime = Math.max(0, Math.min(duration, dragStartTime + deltaTime));
+        dispatch(setCurrentTime(newTime));
+      } else if (dragItem && dragType) {
+        const item = mediaItems.find(i => i.id === dragItem);
+        if (!item) return;
+
+        if (dragType === 'trimStart') {
+          const newStartTime = Math.max(0, Math.min(item.endTime - 0.5, dragStartTime + deltaTime));
+          dispatch(updateMediaItem({
+            id: dragItem,
+            updates: { startTime: newStartTime }
+          }));
+        } else if (dragType === 'trimEnd') {
+          const newEndTime = Math.max(item.startTime + 0.5, Math.min(duration, dragStartTime + deltaTime));
+          dispatch(updateMediaItem({
+            id: dragItem,
+            updates: { endTime: newEndTime }
+          }));
+        } else if (dragType === 'move') {
+          const maxStartTime = duration - (item.endTime - item.startTime);
+          const newStartTime = Math.max(0, Math.min(maxStartTime, dragStartTime + deltaTime));
+          const newEndTime = newStartTime + (item.endTime - item.startTime);
+          dispatch(updateMediaItem({
+            id: dragItem,
+            updates: {
+              startTime: newStartTime,
+              endTime: newEndTime
+            }
+          }));
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      setDragType(null);
+      setDragItem(null);
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragStartX, dragStartTime, dragType, dragItem, duration, mediaItems, currentTime, dispatch]);
+
+  // Group media items by track
+  const trackItems: Record<number, typeof mediaItems> = {};
+  mediaItems.forEach(item => {
+    if (!trackItems[item.track]) {
+      trackItems[item.track] = [];
+    }
+    trackItems[item.track].push(item);
+  });
+
+  // Get all track numbers and sort them
+  const trackNumbers = Object.keys(trackItems).map(Number).sort((a, b) => a - b);
+
+  const zoomIn = () => {
+    setZoom(prev => Math.min(prev * 1.2, 3));
+  };
+
+  const zoomOut = () => {
+    setZoom(prev => Math.max(prev / 1.2, 0.5));
+  };
+
+  // Handle trim button click
+  const handleTrimClick = () => {
+    if (selectedItemId) {
+      const item = mediaItems.find(i => i.id === selectedItemId);
+      if (item) {
+        setTrimStart(item.startTime);
+        setTrimEnd(item.endTime);
+        dispatch(setTrimItemId(selectedItemId));
+        dispatch(setShowTrimControls(true));
+      }
+    } else {
+      alert('Please select a media item to trim');
+    }
+  };
+
+  // Apply trim
+  const applyTrim = () => {
+    if (trimItemId) {
+      dispatch(updateMediaItem({
+        id: trimItemId,
+        updates: {
+          startTime: trimStart,
+          endTime: trimEnd
+        }
+      }));
+      dispatch(setShowTrimControls(false));
+      dispatch(setTrimItemId(null));
+    }
+  };
+
+  // Cancel trim
+  const cancelTrim = () => {
+    dispatch(setShowTrimControls(false));
+    dispatch(setTrimItemId(null));
+  };
+
+  // Toggle mute for audio/video
+  const toggleMute = () => {
+    if (selectedItemId) {
+      const item = mediaItems.find(i => i.id === selectedItemId);
+      if (item && (item.type === 'audio' || item.type === 'video')) {
+        dispatch(updateMediaItem({
+          id: selectedItemId,
+          updates: { isMuted: !item.isMuted }
+        }));
+      }
+    }
+  };
+
+  // Get volume icon based on selected item
+  const getVolumeIcon = () => {
+    if (selectedItemId) {
+      const item = mediaItems.find(i => i.id === selectedItemId);
+      if (item && (item.type === 'audio' || item.type === 'video')) {
+        if (item.isMuted) {
+          return <VolumeXIcon size={16} className="text-gray-600" />;
+        } else {
+          return <Volume2Icon size={16} className="text-gray-600" />;
+        }
+      }
+    }
+    return <VolumeIcon size={16} className="text-gray-600" />;
   };
 
   return (
-    <div className="bg-gray-900 text-white flex flex-col h-64">
-      {/* Timeline Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
-        <div className="flex items-center space-x-4">
-          <span className="text-sm font-medium">Timeline</span>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setZoom(Math.max(0.5, zoom - 0.5))}
-              className="p-1 rounded hover:bg-gray-700"
-            >
-              <ZoomOutIcon size={16} />
-            </button>
-            <span className="text-xs text-gray-400">{Math.round(zoom * 100)}%</span>
-            <button
-              onClick={() => setZoom(Math.min(3, zoom + 0.5))}
-              className="p-1 rounded hover:bg-gray-700"
-            >
-              <ZoomInIcon size={16} />
-            </button>
-          </div>
+    <div className="flex flex-col h-64 border-t border-gray-200 bg-white">
+      <div className="flex items-center justify-between p-2 border-b border-gray-200">
+        <div className="flex items-center space-x-2">
+          <button 
+            className={`p-1 rounded hover:bg-gray-100 ${selectedItemId ? 'text-gray-800' : 'text-gray-400'}`} 
+            onClick={handleTrimClick} 
+            disabled={!selectedItemId}
+          >
+            <ScissorsIcon size={16} className={selectedItemId ? 'text-gray-600' : 'text-gray-400'} />
+          </button>
+          <button 
+            className={`p-1 rounded hover:bg-gray-100 ${selectedItemId && (mediaItems.find(i => i.id === selectedItemId)?.type === 'audio' || mediaItems.find(i => i.id === selectedItemId)?.type === 'video') ? 'text-gray-800' : 'text-gray-400'}`} 
+            onClick={toggleMute} 
+            disabled={!selectedItemId || !(mediaItems.find(i => i.id === selectedItemId)?.type === 'audio' || mediaItems.find(i => i.id === selectedItemId)?.type === 'video')}
+          >
+            {getVolumeIcon()}
+          </button>
+          <button className="p-1 rounded hover:bg-gray-100">
+            <TextIcon size={16} className="text-gray-600" />
+          </button>
+          <button className="p-1 rounded hover:bg-gray-100">
+            <ImageIcon size={16} className="text-gray-600" />
+          </button>
         </div>
-        <div className="text-sm text-gray-400">
-          {formatTime(currentTime)} / {formatTime(duration)}
+        <div className="flex items-center space-x-2">
+          <button onClick={zoomOut} className="p-1 rounded hover:bg-gray-100">
+            <ZoomOutIcon size={16} className="text-gray-600" />
+          </button>
+          <span className="text-xs text-gray-600">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button onClick={zoomIn} className="p-1 rounded hover:bg-gray-100">
+            <ZoomInIcon size={16} className="text-gray-600" />
+          </button>
         </div>
       </div>
 
-      {/* Timeline Ruler */}
-      <div className="flex-1 overflow-auto">
+      {/* Trim controls */}
+      {showTrimControls && (
+        <div className="p-3 bg-gray-100 border-b border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-medium">Trim Selection</h4>
+            <button onClick={cancelTrim} className="text-gray-500 hover:text-gray-700">
+              <XIcon size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">
+                Start Time
+              </label>
+              <input 
+                type="number" 
+                min="0" 
+                max={trimEnd - 0.1} 
+                step="0.1" 
+                value={trimStart} 
+                onChange={e => setTrimStart(parseFloat(e.target.value))} 
+                className="w-full px-2 py-1 border border-gray-300 rounded text-sm" 
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">
+                End Time
+              </label>
+              <input 
+                type="number" 
+                min={trimStart + 0.1} 
+                max={duration} 
+                step="0.1" 
+                value={trimEnd} 
+                onChange={e => setTrimEnd(parseFloat(e.target.value))} 
+                className="w-full px-2 py-1 border border-gray-300 rounded text-sm" 
+              />
+            </div>
+          </div>
+          <button onClick={applyTrim} className="mt-3 w-full bg-blue-500 text-white py-1 rounded text-sm hover:bg-blue-600">
+            Apply Trim
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-x-auto overflow-y-hidden relative">
+        {/* Time ruler */}
+        <div className="sticky top-0 h-6 bg-gray-50 border-b border-gray-200 flex items-end z-10">
+          {timeMarkers.map(time => (
+            <div key={time} className="absolute flex flex-col items-center" style={{
+              left: `${timeToPosition(time)}px`
+            }}>
+              <div className="h-2 w-px bg-gray-400"></div>
+              <span className="text-xs text-gray-500">
+                {Math.floor(time / 60)}:
+                {(time % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Timeline content */}
         <div 
-          ref={timelineRef}
-          className="relative h-full min-w-full cursor-pointer"
-          style={{ width: `${timeToPosition(duration)}px` }}
+          ref={timelineRef} 
+          className="relative" 
+          style={{
+            width: `${timeToPosition(duration)}px`,
+            minHeight: '200px'
+          }} 
           onClick={handleTimelineClick}
         >
-          {/* Time markers */}
-          <div className="absolute top-0 left-0 right-0 h-8 bg-gray-800 border-b border-gray-700">
-            {timeMarkers.map((time) => (
-              <div
-                key={time}
-                className="absolute flex flex-col items-center"
-                style={{ left: `${timeToPosition(time)}px` }}
-              >
-                <div className="w-px h-4 bg-gray-600"></div>
-                <span className="text-xs text-gray-400 mt-1">{formatTime(time)}</span>
-              </div>
-            ))}
-          </div>
-
           {/* Playhead */}
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-20 pointer-events-none"
-            style={{ left: `${timeToPosition(currentTime)}px` }}
+          <div 
+            className="absolute top-0 bottom-0 w-px bg-red-500 z-20" 
+            style={{
+              left: `${timeToPosition(currentTime)}px`
+            }}
           >
-            <div className="absolute -top-1 -left-2 w-4 h-4 bg-red-500 rotate-45 transform origin-center"></div>
+            <div 
+              className="w-4 h-4 bg-red-500 rounded-full -ml-2 cursor-ew-resize" 
+              onMouseDown={e => handleMouseDown(e, 'playhead')}
+            ></div>
           </div>
 
-          {/* Media Items Tracks */}
-          <div className="absolute top-8 left-0 right-0 bottom-0">
-            {/* Track labels */}
-            <div className="absolute left-0 top-0 bottom-0 w-20 bg-gray-800 border-r border-gray-700">
-              <div className="h-12 flex items-center justify-center border-b border-gray-700 text-xs">Video</div>
-              <div className="h-12 flex items-center justify-center border-b border-gray-700 text-xs">Text</div>
-              <div className="h-12 flex items-center justify-center border-b border-gray-700 text-xs">Audio</div>
-            </div>
-
-            {/* Tracks */}
-            <div className="ml-20">
-              {[0, 1, 2].map((trackIndex) => (
-                <div key={trackIndex} className="h-12 border-b border-gray-700 relative">
-                  {mediaItems
-                    .filter(item => item.track === trackIndex)
-                    .map((item) => (
-                      <div
-                        key={item.id}
-                        className={`absolute top-1 bottom-1 rounded cursor-pointer border-2 flex items-center px-2 text-xs ${
-                          selectedItemId === item.id
-                            ? 'border-blue-400 bg-blue-900'
-                            : 'border-gray-600 bg-gray-700 hover:bg-gray-600'
-                        }`}
-                        style={{
-                          left: `${timeToPosition(item.startTime)}px`,
-                          width: `${timeToPosition(item.duration)}px`,
-                          backgroundColor: item.color || '#4B5563'
-                        }}
-                        onClick={() => handleItemClick(item.id)}
-                      >
-                        <div className="flex items-center space-x-1 overflow-hidden">
-                          {item.type === 'video' && <VideoIcon size={12} />}
-                          {item.type === 'audio' && <VolumeIcon size={12} />}
-                          {item.type === 'text' && <TextIcon size={12} />}
-                          {item.type === 'image' && <ImageIcon size={12} />}
-                          <span className="truncate">{item.name}</span>
-                        </div>
-                      </div>
-                    ))}
+          {/* Tracks */}
+          {trackNumbers.map(trackNumber => (
+            <div key={trackNumber} className="h-16 border-b border-gray-200 relative">
+              {trackItems[trackNumber].map(item => (
+                <div 
+                  key={item.id} 
+                  className={`absolute h-12 my-2 rounded-md flex items-center px-2 cursor-move ${
+                    selectedItemId === item.id ? 'ring-2 ring-blue-500' : ''
+                  }`} 
+                  style={{
+                    left: `${timeToPosition(item.startTime)}px`,
+                    width: `${timeToPosition(item.endTime - item.startTime)}px`,
+                    backgroundColor: item.type === 'video' ? '#9d84e8' : item.type === 'audio' ? '#4caf50' : item.type === 'text' ? '#ff9800' : '#2196f3',
+                    opacity: item.isMuted ? 0.5 : 0.8
+                  }} 
+                  onMouseDown={e => handleMouseDown(e, 'move', item.id)} 
+                  onClick={e => {
+                    e.stopPropagation();
+                    dispatch(setSelectedItemId(item.id));
+                  }}
+                >
+                  <span className="text-white text-xs font-medium truncate">
+                    {item.name} {item.isMuted ? '(Muted)' : ''}
+                  </span>
+                  {/* Trim handles */}
+                  <div 
+                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize" 
+                    onMouseDown={e => handleMouseDown(e, 'trimStart', item.id)}
+                  ></div>
+                  <div 
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize" 
+                    onMouseDown={e => handleMouseDown(e, 'trimEnd', item.id)}
+                  ></div>
                 </div>
               ))}
             </div>
+          ))}
+
+          {/* Add track button */}
+          <div className="h-12 flex items-center justify-center border-b border-gray-200">
+            <button className="flex items-center text-xs text-gray-600 hover:text-gray-800">
+              <PlusIcon size={14} className="mr-1" />
+              Add Track
+            </button>
           </div>
         </div>
       </div>

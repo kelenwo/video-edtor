@@ -8,8 +8,13 @@ import {
   selectDuration,
   selectIsPlaying,
   selectMediaItems,
+  selectActiveTextItem,
+  selectIsDraggingText,
   setCurrentTime,
-  setIsPlaying
+  setIsPlaying,
+  updateMediaItem,
+  setActiveTextItem,
+  setIsDraggingText
 } from '../redux/videoEditorSlice';
 
 export const VideoPreview = () => {
@@ -18,9 +23,15 @@ export const VideoPreview = () => {
   const duration = useAppSelector(selectDuration);
   const isPlaying = useAppSelector(selectIsPlaying);
   const mediaItems = useAppSelector(selectMediaItems);
+  const activeTextItem = useAppSelector(selectActiveTextItem);
+  const isDraggingText = useAppSelector(selectIsDraggingText);
 
   const previewRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [dragStartPos, setDragStartPos] = useState({
+    x: 0,
+    y: 0
+  });
 
   // Format time as MM:SS.MS
   const formatTime = (time: number) => {
@@ -53,172 +64,157 @@ export const VideoPreview = () => {
 
   // Listen to video timeupdate event to sync with timeline
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
+    const videoElement = videoRef.current;
     const handleTimeUpdate = () => {
-      if (isPlaying) {
-        dispatch(setCurrentTime(video.currentTime));
+      if (videoElement && !isDraggingText) {
+        dispatch(setCurrentTime(videoElement.currentTime));
       }
     };
 
-    const handleEnded = () => {
+    const handleVideoEnded = () => {
       dispatch(setIsPlaying(false));
       dispatch(setCurrentTime(0));
     };
 
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('ended', handleEnded);
+    if (videoElement) {
+      videoElement.addEventListener('timeupdate', handleTimeUpdate);
+      videoElement.addEventListener('ended', handleVideoEnded);
+    }
 
     return () => {
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('ended', handleEnded);
+      if (videoElement) {
+        videoElement.removeEventListener('timeupdate', handleTimeUpdate);
+        videoElement.removeEventListener('ended', handleVideoEnded);
+      }
     };
-  }, [isPlaying, dispatch]);
+  }, [dispatch, isDraggingText]);
 
-  const togglePlayPause = () => {
+  const togglePlayback = () => {
     dispatch(setIsPlaying(!isPlaying));
   };
 
   const skipBackward = () => {
-    const newTime = Math.max(0, currentTime - 5);
-    dispatch(setCurrentTime(newTime));
+    dispatch(setCurrentTime(Math.max(0, currentTime - 5)));
   };
 
   const skipForward = () => {
-    const newTime = Math.min(duration, currentTime + 5);
-    dispatch(setCurrentTime(newTime));
+    dispatch(setCurrentTime(Math.min(duration, currentTime + 5)));
   };
 
-  // Get current video item for preview
-  const currentVideoItem = mediaItems.find(item => 
-    item.type === 'video' && 
-    currentTime >= item.startTime && 
-    currentTime <= item.endTime
-  );
+  // Find active media items at current time
+  const activeItems = mediaItems.filter(item => currentTime >= item.startTime && currentTime <= item.endTime);
+  const activeTextItems = activeItems.filter(item => item.type === 'text');
+  const activeVideoItems = activeItems.filter(item => item.type === 'video');
 
-  // Get current text items for overlay
-  const currentTextItems = mediaItems.filter(item => 
-    item.type === 'text' && 
-    currentTime >= item.startTime && 
-    currentTime <= item.endTime
-  );
+  // Handle text dragging
+  const handleTextMouseDown = (e: React.MouseEvent, itemId: string) => {
+    e.stopPropagation();
+    if (!previewRef.current) return;
+    
+    dispatch(setActiveTextItem(itemId));
+    dispatch(setIsDraggingText(true));
+    const rect = previewRef.current.getBoundingClientRect();
+    setDragStartPos({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingText || !activeTextItem || !previewRef.current) return;
+      
+      const rect = previewRef.current.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      
+      dispatch(updateMediaItem({
+        id: activeTextItem,
+        updates: {
+          position: { x, y }
+        }
+      }));
+    };
+
+    const handleMouseUp = () => {
+      dispatch(setIsDraggingText(false));
+    };
+
+    if (isDraggingText) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingText, activeTextItem, dispatch]);
+
+  // Get the main video if available
+  const mainVideo = activeVideoItems[0];
 
   return (
-    <div className="flex-1 bg-gray-100 flex flex-col">
-      {/* Preview Area */}
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div 
-          ref={previewRef}
-          className="relative bg-black rounded-lg overflow-hidden shadow-lg"
-          style={{ width: '640px', height: '360px' }}
-        >
-          {/* Video */}
-          {currentVideoItem?.url ? (
-            <video
-              ref={videoRef}
-              src={currentVideoItem.url}
-              className="w-full h-full object-cover"
-              muted={currentVideoItem.isMuted}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gray-800">
-              <div className="text-center text-gray-400">
-                <PlayIcon size={48} className="mx-auto mb-2" />
-                <p>No video selected</p>
-                <p className="text-sm">Add a video to the timeline to preview</p>
-              </div>
-            </div>
-          )}
+    <div className="flex-1 flex flex-col p-4 min-h-0">
+      <div ref={previewRef} className="relative flex-1 bg-black rounded-lg flex items-center justify-center overflow-hidden">
+        {/* Video element */}
+        {mainVideo ? (
+          <video 
+            ref={videoRef} 
+            src={mainVideo.url} 
+            className="max-w-full max-h-full object-contain" 
+            muted={mainVideo.isMuted} 
+            loop 
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-800 text-white">
+            No video selected
+          </div>
+        )}
 
-          {/* Text Overlays */}
-          {currentTextItems.map((textItem) => (
-            <div
-              key={textItem.id}
-              className="absolute pointer-events-none"
-              style={{
-                left: `${textItem.position?.x || 50}%`,
-                top: `${textItem.position?.y || 50}%`,
-                transform: 'translate(-50%, -50%)',
-                fontSize: `${textItem.fontSize || 32}px`,
-                fontFamily: textItem.fontFamily || 'Arial',
-                color: textItem.fontColor || '#ffffff',
-                fontWeight: textItem.fontWeight || 'normal',
-                fontStyle: textItem.fontStyle || 'normal',
-                textAlign: textItem.textAlign || 'center'
-              }}
-            >
-              {textItem.content}
-            </div>
-          ))}
-
-          {/* Play overlay when paused */}
-          {!isPlaying && currentVideoItem && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30">
-              <button
-                onClick={togglePlayPause}
-                className="p-4 bg-white bg-opacity-20 backdrop-blur-sm rounded-full text-white hover:bg-opacity-30 transition-colors"
-              >
-                <PlayIcon size={32} />
-              </button>
-            </div>
-          )}
-        </div>
+        {/* Text overlays */}
+        {activeTextItems.map(item => (
+          <div 
+            key={item.id} 
+            className={`absolute text-white cursor-move ${activeTextItem === item.id ? 'ring-2 ring-blue-500' : ''}`} 
+            style={{
+              top: `${item.position?.y || 20}%`,
+              left: `${item.position?.x || 50}%`,
+              transform: 'translate(-50%, -50%)',
+              fontSize: `${item.fontSize || 32}px`,
+              fontFamily: item.fontFamily || 'Arial',
+              color: item.fontColor || '#ffffff',
+              fontWeight: item.fontWeight || 'bold',
+              fontStyle: item.fontStyle || 'normal',
+              textAlign: item.textAlign || 'center',
+              textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+              padding: '4px 8px'
+            }} 
+            onMouseDown={e => handleTextMouseDown(e, item.id)}
+          >
+            {item.content}
+          </div>
+        ))}
       </div>
 
-      {/* Controls */}
-      <div className="bg-white border-t border-gray-200 p-4">
-        <div className="flex items-center justify-between">
-          {/* Playback Controls */}
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={skipBackward}
-              className="p-2 rounded-full hover:bg-gray-100"
-            >
-              <SkipBackIcon size={20} />
-            </button>
-            <button
-              onClick={togglePlayPause}
-              className="p-3 bg-blue-500 text-white rounded-full hover:bg-blue-600"
-            >
-              {isPlaying ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
-            </button>
-            <button
-              onClick={skipForward}
-              className="p-2 rounded-full hover:bg-gray-100"
-            >
-              <SkipForwardIcon size={20} />
-            </button>
-          </div>
-
-          {/* Time Display */}
-          <div className="flex items-center space-x-4">
-            <span className="text-sm text-gray-600 font-mono">
-              {formatTime(currentTime)} / {formatTime(duration)}
-            </span>
-            <button className="p-2 rounded-full hover:bg-gray-100">
-              <MaximizeIcon size={20} />
-            </button>
-          </div>
+      <div className="mt-3 flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <button onClick={skipBackward} className="p-1 rounded-full hover:bg-gray-200">
+            <SkipBackIcon size={20} className="text-gray-700" />
+          </button>
+          <button onClick={togglePlayback} className="p-2 bg-gray-200 rounded-full hover:bg-gray-300">
+            {isPlaying ? <PauseIcon size={20} className="text-gray-800" /> : <PlayIcon size={20} className="text-gray-800" />}
+          </button>
+          <button onClick={skipForward} className="p-1 rounded-full hover:bg-gray-200">
+            <SkipForwardIcon size={20} className="text-gray-700" />
+          </button>
         </div>
-
-        {/* Progress Bar */}
-        <div className="mt-4">
-          <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div
-              className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-100"
-              style={{ width: `${(currentTime / duration) * 100}%` }}
-            />
-            <input
-              type="range"
-              min="0"
-              max={duration}
-              value={currentTime}
-              onChange={(e) => dispatch(setCurrentTime(Number(e.target.value)))}
-              className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
-            />
-          </div>
+        <div className="text-sm text-gray-600">
+          {formatTime(currentTime)} / {formatTime(duration)}
         </div>
+        <button className="p-1 rounded-full hover:bg-gray-200">
+          <MaximizeIcon size={20} className="text-gray-700" />
+        </button>
       </div>
     </div>
   );

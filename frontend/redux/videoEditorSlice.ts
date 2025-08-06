@@ -109,12 +109,19 @@ const videoEditorSlice = createSlice({
     setIsPlaying: (state, action: PayloadAction<boolean>) => {
       state.isPlaying = action.payload;
     },
-    addMediaItem: (state, action: PayloadAction<Omit<MediaItem, 'id'>>) => {
-      const newItem = {
-        ...action.payload,
-        id: Math.random().toString(36).substr(2, 9)
-      };
-      state.mediaItems.push(newItem);
+    addMediaItem: {
+      reducer: (state, action: PayloadAction<MediaItem>) => {
+        state.mediaItems.push(action.payload);
+      },
+      prepare: (payload: Omit<MediaItem, 'id'>) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        return {
+          payload: {
+            ...payload,
+            id
+          }
+        };
+      }
     },
     updateMediaItem: (state, action: PayloadAction<{ id: string; updates: Partial<MediaItem> }>) => {
       const { id, updates } = action.payload;
