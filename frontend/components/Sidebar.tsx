@@ -294,7 +294,7 @@ export const Sidebar = () => {
   return (
     <div className="flex h-full">
       {/* Main vertical sidebar with icons */}
-      <div className="w-16 bg-gray-900 flex flex-col items-center py-4">
+      <div className="w-16 bg-white border-r border-gray-200 flex flex-col items-center py-4">
         <div className="mb-6">
           <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
             <LayersIcon size={20} className="text-white" />
@@ -302,56 +302,56 @@ export const Sidebar = () => {
         </div>
         <div className="flex flex-col space-y-6 items-center">
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'add' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'add' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('add')}
           >
             <PlusIcon size={20} />
             <span className="text-xs mt-1 block">Add</span>
           </button>
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'uploads' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'uploads' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('uploads')}
           >
             <UploadIcon size={20} />
             <span className="text-xs mt-1 block">Uploads</span>
           </button>
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'text' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'text' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('text')}
           >
             <TextIcon size={20} />
             <span className="text-xs mt-1 block">Text</span>
           </button>
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'videos' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'videos' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('videos')}
           >
             <VideoIcon size={20} />
             <span className="text-xs mt-1 block">Videos</span>
           </button>
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'audios' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'audios' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('audios')}
           >
             <MusicIcon size={20} />
             <span className="text-xs mt-1 block">Audios</span>
           </button>
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'photos' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'photos' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('photos')}
           >
             <ImageIcon size={20} />
             <span className="text-xs mt-1 block">Photos</span>
           </button>
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'records' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'records' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('records')}
           >
             <ClockIcon size={20} />
             <span className="text-xs mt-1 block">Records</span>
           </button>
           <button 
-            className={`p-2 rounded-lg ${activeItem === 'subtitles' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`} 
+            className={`p-2 rounded-lg ${activeItem === 'subtitles' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`} 
             onClick={() => setActiveItem('subtitles')}
           >
             <FileTextIcon size={20} />
@@ -362,8 +362,8 @@ export const Sidebar = () => {
 
       {/* Content sidebar that changes based on selected item */}
       {sidebarOpen && (
-        <div className="w-64 bg-gray-800 text-white flex flex-col">
-          <div className="flex items-center justify-between p-3 border-b border-gray-700">
+        <div className="w-64 bg-white text-gray-900 flex flex-col border-r border-gray-200">
+                      <div className="flex items-center justify-between p-3 border-b border-gray-200">
             <h3 className="font-medium">
               {activeItem === 'add' && 'Add'}
               {activeItem === 'uploads' && 'Uploads'}
@@ -374,7 +374,7 @@ export const Sidebar = () => {
               {activeItem === 'records' && 'Records'}
               {activeItem === 'subtitles' && 'Subtitles'}
             </h3>
-            <button onClick={toggleSidebar} className="p-1 rounded-lg text-gray-400 hover:text-white">
+            <button onClick={toggleSidebar} className="p-1 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100">
               <ChevronLeftIcon size={18} />
             </button>
           </div>
@@ -385,9 +385,9 @@ export const Sidebar = () => {
           <div className="flex-1 overflow-y-auto p-3">
             {activeItem === 'add' && (
               <div className="space-y-4">
-                <div className="border-2 border-dashed border-gray-600 rounded-lg p-4 text-center hover:border-blue-500 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                  <UploadIcon size={24} className="mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm text-gray-300">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                  <UploadIcon size={24} className="mx-auto mb-2 text-gray-500" />
+                  <p className="text-sm text-gray-600">
                     Drag & drop or click to upload
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
@@ -708,7 +708,7 @@ export const Sidebar = () => {
 
       {/* Toggle button when sidebar is closed */}
       {!sidebarOpen && (
-        <button onClick={toggleSidebar} className="p-2 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-r-md">
+        <button onClick={toggleSidebar} className="p-2 bg-white hover:bg-gray-100 text-gray-600 hover:text-gray-900 rounded-r-md border border-l-0 border-gray-200">
           <ChevronRightIcon size={20} />
         </button>
       )}
