@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Poppins', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .editor-panel {
+    @apply bg-editor-gray border-r border-editor-light-gray;
+  }
+  
+  .editor-button {
+    @apply px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200;
+  }
+  
+  .editor-button-primary {
+    @apply bg-editor-blue text-white hover:bg-blue-600;
+}
+
+  .editor-button-secondary {
+    @apply bg-editor-gray text-white hover:bg-editor-light-gray;
+  }
+  
+  .timeline-track {
+    @apply bg-editor-darker border-b border-editor-light-gray;
+  }
+  
+  .timeline-clip {
+    @apply rounded-md cursor-pointer transition-all duration-200 hover:shadow-lg;
+  }
+  
+  .video-player {
+    @apply bg-black rounded-lg overflow-hidden;
+  }
+  
+  .tool-panel {
+    @apply bg-editor-gray p-4 rounded-lg;
+  }
+}
