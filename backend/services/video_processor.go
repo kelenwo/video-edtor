@@ -334,20 +334,32 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 
 	inputIndex := 0
 	videoOverlays := []string{"base"}
+	
+	// Track if we have any valid inputs
+	hasValidInputs := false
 
 	// Sort media items by track and start time for proper layering
 	for _, item := range projectData.MediaItems {
 		if item.Type == "video" || item.Type == "image" {
-			// Convert relative URL to absolute path
-			inputPath := strings.TrimPrefix(item.URL, "/")
+			// Convert URL to local file path
+			var inputPath string
+			if strings.HasPrefix(item.URL, "http://localhost:8080/") {
+				// Remove the server URL prefix to get the local path
+				inputPath = strings.TrimPrefix(item.URL, "http://localhost:8080/")
+			} else {
+				// Handle relative URLs
+				inputPath = strings.TrimPrefix(item.URL, "/")
+			}
+			
 			if _, err := os.Stat(inputPath); os.IsNotExist(err) {
-				log.Printf("Warning: Input file does not exist: %s", inputPath)
+				log.Printf("Warning: Input file does not exist: %s (original URL: %s)", inputPath, item.URL)
 				continue
 			}
 
 			// Add input file
 			cmdArgs = append(cmdArgs, "-i", inputPath)
 			inputFiles = append(inputFiles, inputPath)
+			hasValidInputs = true
 
 			// Calculate position and size
 			x := int(item.X)
@@ -389,23 +401,49 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 
 			inputIndex++
 		} else if item.Type == "text" {
-			// Add text overlay
-			escapedText := strings.ReplaceAll(item.Text, "'", "\\'")
-			textFilter := fmt.Sprintf("drawtext=text='%s':x=%d:y=%d:fontsize=%d:fontcolor=%s:enable='between(t,%f,%f)'",
-				escapedText, int(item.X), int(item.Y), int(item.FontSize), item.Color, item.StartTime, item.EndTime)
-			
-			// Apply text to the current overlay
-			if len(videoOverlays) > 0 {
-				overlayLabel := fmt.Sprintf("text_overlay%d", inputIndex)
-				textOverlay := fmt.Sprintf("[%s]%s[%s]", videoOverlays[len(videoOverlays)-1], textFilter, overlayLabel)
-				filterComplex = append(filterComplex, textOverlay)
-				videoOverlays[len(videoOverlays)-1] = overlayLabel
+			// Add text overlay with validation
+			if item.Text != "" {
+				escapedText := strings.ReplaceAll(item.Text, "'", "\\'")
+				
+				// Set default values for missing properties
+				color := item.Color
+				if color == "" {
+					color = "white"
+				}
+				
+				fontSize := item.FontSize
+				if fontSize == 0 {
+					fontSize = 24
+				}
+				
+				x := int(item.X)
+				y := int(item.Y)
+				
+				textFilter := fmt.Sprintf("drawtext=text='%s':x=%d:y=%d:fontsize=%d:fontcolor=%s:enable='between(t,%f,%f)'",
+					escapedText, x, y, int(fontSize), color, item.StartTime, item.EndTime)
+				
+				// Apply text to the current overlay
+				if len(videoOverlays) > 0 {
+					overlayLabel := fmt.Sprintf("text_overlay%d", inputIndex)
+					textOverlay := fmt.Sprintf("[%s]%s[%s]", videoOverlays[len(videoOverlays)-1], textFilter, overlayLabel)
+					filterComplex = append(filterComplex, textOverlay)
+					videoOverlays[len(videoOverlays)-1] = overlayLabel
+					hasValidInputs = true
+				}
 			}
 		} else if item.Type == "audio" && !item.IsMuted {
 			// Handle standalone audio files
-			inputPath := strings.TrimPrefix(item.URL, "/")
+			var inputPath string
+			if strings.HasPrefix(item.URL, "http://localhost:8080/") {
+				// Remove the server URL prefix to get the local path
+				inputPath = strings.TrimPrefix(item.URL, "http://localhost:8080/")
+			} else {
+				// Handle relative URLs
+				inputPath = strings.TrimPrefix(item.URL, "/")
+			}
+			
 			if _, err := os.Stat(inputPath); os.IsNotExist(err) {
-				log.Printf("Warning: Audio file does not exist: %s", inputPath)
+				log.Printf("Warning: Audio file does not exist: %s (original URL: %s)", inputPath, item.URL)
 				continue
 			}
 
@@ -415,6 +453,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 			filterComplex = append(filterComplex, audioFilter)
 			audioInputs = append(audioInputs, fmt.Sprintf("[audio%d]", inputIndex))
 			inputIndex++
+			hasValidInputs = true
 		}
 	}
 
@@ -428,17 +467,33 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 		}
 	}
 
-	// Final output mapping
-	finalVideoLabel := videoOverlays[len(videoOverlays)-1]
-	
-	// Join filter complex
-	filterComplexStr := strings.Join(filterComplex, ";")
-	cmdArgs = append(cmdArgs, "-filter_complex", filterComplexStr)
-
-	// Map outputs
-	cmdArgs = append(cmdArgs, "-map", fmt.Sprintf("[%s]", finalVideoLabel))
-	if len(audioInputs) > 0 {
-		cmdArgs = append(cmdArgs, "-map", "[final_audio]")
+	// Check if we have any content to export
+	if !hasValidInputs {
+		// Create a simple test video if no inputs are valid
+		log.Printf("No valid inputs found, creating a simple test video")
+		cmdArgs = []string{
+			"-f", "lavfi",
+			"-i", fmt.Sprintf("color=blue:%dx%d:d=%f", width, height, projectData.Duration),
+			"-f", "lavfi", 
+			"-i", fmt.Sprintf("sine=frequency=440:duration=%f", projectData.Duration),
+		}
+		// Add text overlay saying "No media found"
+		filterComplexStr := fmt.Sprintf("[0:v]drawtext=text='No media files found':x=(w-text_w)/2:y=(h-text_h)/2:fontsize=48:fontcolor=white[v]")
+		cmdArgs = append(cmdArgs, "-filter_complex", filterComplexStr)
+		cmdArgs = append(cmdArgs, "-map", "[v]", "-map", "1:a")
+	} else {
+		// Final output mapping
+		finalVideoLabel := videoOverlays[len(videoOverlays)-1]
+		
+		// Join filter complex
+		filterComplexStr := strings.Join(filterComplex, ";")
+		cmdArgs = append(cmdArgs, "-filter_complex", filterComplexStr)
+		
+		// Map outputs
+		cmdArgs = append(cmdArgs, "-map", fmt.Sprintf("[%s]", finalVideoLabel))
+		if len(audioInputs) > 0 {
+			cmdArgs = append(cmdArgs, "-map", "[final_audio]")
+		}
 	}
 
 	// Set codec and quality based on settings
@@ -462,6 +517,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 	cmdArgs = append(cmdArgs, outputPath)
 
 	log.Printf("FFmpeg export command: ffmpeg %v", cmdArgs)
+	log.Printf("Project duration: %f, Media items count: %d", projectData.Duration, len(projectData.MediaItems))
 
 	// Execute FFmpeg command
 	cmd := exec.Command("ffmpeg", cmdArgs...)
