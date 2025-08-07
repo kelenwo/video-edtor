@@ -2,17 +2,17 @@ package services
 
 import (
 	"bytes"
-	"context"
+	_ "context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
-	"time"
-	"encoding/json"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"path/filepath"
-	"os"
+	"time"
 
 	"video-editor/db"
 	"video-editor/models"
@@ -223,10 +223,10 @@ func (vp *VideoProcessor) executeProjectExport(job models.VideoProcessingJob) (s
 
 	var projectData struct {
 		MediaItems []struct {
-			ID       string  `json:"id"`
-			Type     string  `json:"type"`
-			URL      string  `json:"url"`
-			Track    int     `json:"track"`
+			ID        string  `json:"id"`
+			Type      string  `json:"type"`
+			URL       string  `json:"url"`
+			Track     int     `json:"track"`
 			StartTime float64 `json:"startTime"`
 			EndTime   float64 `json:"endTime"`
 			Duration  float64 `json:"duration"`
@@ -291,10 +291,10 @@ func (vp *VideoProcessor) executeProjectExport(job models.VideoProcessingJob) (s
 // buildComplexFFmpegCommand constructs FFmpeg command for complex video composition
 func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 	MediaItems []struct {
-		ID       string  `json:"id"`
-		Type     string  `json:"type"`
-		URL      string  `json:"url"`
-		Track    int     `json:"track"`
+		ID        string  `json:"id"`
+		Type      string  `json:"type"`
+		URL       string  `json:"url"`
+		Track     int     `json:"track"`
 		StartTime float64 `json:"startTime"`
 		EndTime   float64 `json:"endTime"`
 		Duration  float64 `json:"duration"`
@@ -359,17 +359,17 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 				// Scale and position video
 				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d];", inputIndex, w, h, inputIndex)
 				filterComplex = append(filterComplex, filterPart)
-				
+
 				// Overlay video on canvas
 				overlayLabel := fmt.Sprintf("overlay%d", inputIndex)
-				overlayPart := fmt.Sprintf("[%s][scaled%d]overlay=%d:%d:enable='between(t,%f,%f)'[%s]", 
+				overlayPart := fmt.Sprintf("[%s][scaled%d]overlay=%d:%d:enable='between(t,%f,%f)'[%s]",
 					videoOverlays[len(videoOverlays)-1], inputIndex, x, y, item.StartTime, item.EndTime, overlayLabel)
 				filterComplex = append(filterComplex, overlayPart)
 				videoOverlays = append(videoOverlays, overlayLabel)
 
 				// Handle audio if not muted
 				if !item.IsMuted {
-					audioFilter := fmt.Sprintf("[%d:a]adelay=%dms:all=1[audio%d]", 
+					audioFilter := fmt.Sprintf("[%d:a]adelay=%dms:all=1[audio%d]",
 						inputIndex, int(item.StartTime*1000), inputIndex)
 					filterComplex = append(filterComplex, audioFilter)
 					audioInputs = append(audioInputs, fmt.Sprintf("[audio%d]", inputIndex))
@@ -378,10 +378,10 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 				// Scale and position image
 				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d];", inputIndex, w, h, inputIndex)
 				filterComplex = append(filterComplex, filterPart)
-				
+
 				// Overlay image on canvas
 				overlayLabel := fmt.Sprintf("overlay%d", inputIndex)
-				overlayPart := fmt.Sprintf("[%s][scaled%d]overlay=%d:%d:enable='between(t,%f,%f)'[%s]", 
+				overlayPart := fmt.Sprintf("[%s][scaled%d]overlay=%d:%d:enable='between(t,%f,%f)'[%s]",
 					videoOverlays[len(videoOverlays)-1], inputIndex, x, y, item.StartTime, item.EndTime, overlayLabel)
 				filterComplex = append(filterComplex, overlayPart)
 				videoOverlays = append(videoOverlays, overlayLabel)
@@ -393,7 +393,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 			escapedText := strings.ReplaceAll(item.Text, "'", "\\'")
 			textFilter := fmt.Sprintf("drawtext=text='%s':x=%d:y=%d:fontsize=%d:fontcolor=%s:enable='between(t,%f,%f)'",
 				escapedText, int(item.X), int(item.Y), int(item.FontSize), item.Color, item.StartTime, item.EndTime)
-			
+
 			// Apply text to the current overlay
 			if len(videoOverlays) > 0 {
 				overlayLabel := fmt.Sprintf("text_overlay%d", inputIndex)
@@ -410,7 +410,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 			}
 
 			cmdArgs = append(cmdArgs, "-i", inputPath)
-			audioFilter := fmt.Sprintf("[%d:a]adelay=%dms:all=1[audio%d]", 
+			audioFilter := fmt.Sprintf("[%d:a]adelay=%dms:all=1[audio%d]",
 				inputIndex, int(item.StartTime*1000), inputIndex)
 			filterComplex = append(filterComplex, audioFilter)
 			audioInputs = append(audioInputs, fmt.Sprintf("[audio%d]", inputIndex))
@@ -430,7 +430,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 
 	// Final output mapping
 	finalVideoLabel := videoOverlays[len(videoOverlays)-1]
-	
+
 	// Join filter complex
 	filterComplexStr := strings.Join(filterComplex, ";")
 	cmdArgs = append(cmdArgs, "-filter_complex", filterComplexStr)
@@ -458,7 +458,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 	// Set duration and other parameters
 	cmdArgs = append(cmdArgs, "-t", fmt.Sprintf("%f", projectData.Duration))
 	cmdArgs = append(cmdArgs, "-r", "30") // Frame rate
-	cmdArgs = append(cmdArgs, "-y") // Overwrite output file
+	cmdArgs = append(cmdArgs, "-y")       // Overwrite output file
 	cmdArgs = append(cmdArgs, outputPath)
 
 	log.Printf("FFmpeg export command: ffmpeg %v", cmdArgs)
@@ -477,7 +477,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 	}
 
 	log.Printf("FFmpeg export output: %s", out.String())
-	
+
 	// Return the URL for the exported file
 	exportURL := fmt.Sprintf("/uploads/%s/exports/%s", strings.Split(outputPath, "/")[1], filepath.Base(outputPath))
 	return exportURL, nil

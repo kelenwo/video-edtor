@@ -1,12 +1,12 @@
 package services
 
 import (
-	"context"
+	_ "context"
 	"errors"
 	"time"
 
-	"go-video-editor-poc/db"
-	"go-video-editor-poc/models"
+	"video-editor/db"
+	"video-editor/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"

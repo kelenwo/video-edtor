@@ -25,7 +25,7 @@ func LoadConfig() *Config {
 
 	cfg := &Config{
 		MongoDBURI: getEnv("MONGO_URI", "mongodb://localhost:27017"),
-		DBName:     getEnv("MONGO_DB_NAME", "video_editor_poc"),
+		DBName:     getEnv("MONGO_DB_NAME", "video_editor"),
 		JWTSecret:  getEnv("JWT_SECRET", "supersecretjwtkey"), // IMPORTANT: Change this in production!
 		Port:       getEnv("PORT", "8080"),
 	}
