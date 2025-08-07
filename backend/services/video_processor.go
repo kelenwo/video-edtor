@@ -3,14 +3,20 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
 	"time"
+	"encoding/json"
+	"strconv"
+	"strings"
+	"path/filepath"
+	"os"
 
-	"go-video-editor-poc/db"
-	"go-video-editor-poc/models"
-	"go-video-editor-poc/websocket" // Import the websocket package
+	"video-editor/db"
+	"video-editor/models"
+	"video-editor/websocket" // Import the websocket package
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -95,6 +101,10 @@ func (vp *VideoProcessor) executeFFmpeg(job models.VideoProcessingJob) (string, 
 	var cmdArgs []string
 
 	switch job.Action {
+	case "export":
+		// Handle full project export
+		return vp.executeProjectExport(job)
+
 	case "trim":
 		// Expecting params: {"start_time": float64, "end_time": float64}
 		startTime, ok1 := job.Params["start_time"].(float64)
@@ -190,4 +200,285 @@ func (vp *VideoProcessor) updateProjectStatus(projectID string, status, outputUR
 	}
 	_, err = vp.projectsCollection.UpdateByID(db.Ctx, objID, update)
 	return err
+}
+
+// executeProjectExport handles the export of a complete video project
+func (vp *VideoProcessor) executeProjectExport(job models.VideoProcessingJob) (string, error) {
+	// Extract project data and settings
+	projectDataInterface, ok := job.Params["projectData"]
+	if !ok {
+		return "", errors.New("missing project data")
+	}
+
+	settingsInterface, ok := job.Params["settings"]
+	if !ok {
+		return "", errors.New("missing export settings")
+	}
+
+	// Parse project data
+	projectDataBytes, err := json.Marshal(projectDataInterface)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal project data: %v", err)
+	}
+
+	var projectData struct {
+		MediaItems []struct {
+			ID       string  `json:"id"`
+			Type     string  `json:"type"`
+			URL      string  `json:"url"`
+			Track    int     `json:"track"`
+			StartTime float64 `json:"startTime"`
+			EndTime   float64 `json:"endTime"`
+			Duration  float64 `json:"duration"`
+			X         float64 `json:"x"`
+			Y         float64 `json:"y"`
+			Width     float64 `json:"width"`
+			Height    float64 `json:"height"`
+			Text      string  `json:"text"`
+			Color     string  `json:"color"`
+			FontSize  float64 `json:"fontSize"`
+			IsMuted   bool    `json:"isMuted"`
+		} `json:"mediaItems"`
+		Duration    float64 `json:"duration"`
+		AspectRatio string  `json:"aspectRatio"`
+	}
+
+	if err := json.Unmarshal(projectDataBytes, &projectData); err != nil {
+		return "", fmt.Errorf("failed to parse project data: %v", err)
+	}
+
+	// Parse export settings
+	settingsBytes, err := json.Marshal(settingsInterface)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal settings: %v", err)
+	}
+
+	var settings struct {
+		Quality    string `json:"quality"`    // "high", "medium", "low"
+		Format     string `json:"format"`     // "mp4", "webm", "avi"
+		Resolution string `json:"resolution"` // "1920x1080", "1280x720", "854x480"
+	}
+
+	if err := json.Unmarshal(settingsBytes, &settings); err != nil {
+		return "", fmt.Errorf("failed to parse settings: %v", err)
+	}
+
+	// Set default values
+	if settings.Quality == "" {
+		settings.Quality = "medium"
+	}
+	if settings.Format == "" {
+		settings.Format = "mp4"
+	}
+	if settings.Resolution == "" {
+		settings.Resolution = "1920x1080"
+	}
+
+	// Create output directory for user exports
+	userExportDir := filepath.Join("uploads", job.UserID, "exports")
+	if err := os.MkdirAll(userExportDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create export directory: %v", err)
+	}
+
+	// Generate output filename
+	outputFileName := fmt.Sprintf("export_%s.%s", job.ID.Hex(), settings.Format)
+	outputPath := filepath.Join(userExportDir, outputFileName)
+
+	// Build FFmpeg command for complex composition
+	return vp.buildComplexFFmpegCommand(projectData, settings, outputPath)
+}
+
+// buildComplexFFmpegCommand constructs FFmpeg command for complex video composition
+func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
+	MediaItems []struct {
+		ID       string  `json:"id"`
+		Type     string  `json:"type"`
+		URL      string  `json:"url"`
+		Track    int     `json:"track"`
+		StartTime float64 `json:"startTime"`
+		EndTime   float64 `json:"endTime"`
+		Duration  float64 `json:"duration"`
+		X         float64 `json:"x"`
+		Y         float64 `json:"y"`
+		Width     float64 `json:"width"`
+		Height    float64 `json:"height"`
+		Text      string  `json:"text"`
+		Color     string  `json:"color"`
+		FontSize  float64 `json:"fontSize"`
+		IsMuted   bool    `json:"isMuted"`
+	} `json:"mediaItems"`
+	Duration    float64 `json:"duration"`
+	AspectRatio string  `json:"aspectRatio"`
+}, settings struct {
+	Quality    string `json:"quality"`
+	Format     string `json:"format"`
+	Resolution string `json:"resolution"`
+}, outputPath string) (string, error) {
+
+	// Start building FFmpeg command
+	var cmdArgs []string
+	var inputFiles []string
+	var filterComplex []string
+	var audioInputs []string
+
+	// Parse resolution
+	resParts := strings.Split(settings.Resolution, "x")
+	if len(resParts) != 2 {
+		return "", errors.New("invalid resolution format")
+	}
+	width, _ := strconv.Atoi(resParts[0])
+	height, _ := strconv.Atoi(resParts[1])
+
+	// Create blank canvas
+	filterComplex = append(filterComplex, fmt.Sprintf("color=black:%dx%d:d=%f[base]", width, height, projectData.Duration))
+
+	inputIndex := 0
+	videoOverlays := []string{"base"}
+
+	// Sort media items by track and start time for proper layering
+	for _, item := range projectData.MediaItems {
+		if item.Type == "video" || item.Type == "image" {
+			// Convert relative URL to absolute path
+			inputPath := strings.TrimPrefix(item.URL, "/")
+			if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+				log.Printf("Warning: Input file does not exist: %s", inputPath)
+				continue
+			}
+
+			// Add input file
+			cmdArgs = append(cmdArgs, "-i", inputPath)
+			inputFiles = append(inputFiles, inputPath)
+
+			// Calculate position and size
+			x := int(item.X)
+			y := int(item.Y)
+			w := int(item.Width)
+			h := int(item.Height)
+
+			if item.Type == "video" {
+				// Scale and position video
+				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d];", inputIndex, w, h, inputIndex)
+				filterComplex = append(filterComplex, filterPart)
+				
+				// Overlay video on canvas
+				overlayLabel := fmt.Sprintf("overlay%d", inputIndex)
+				overlayPart := fmt.Sprintf("[%s][scaled%d]overlay=%d:%d:enable='between(t,%f,%f)'[%s]", 
+					videoOverlays[len(videoOverlays)-1], inputIndex, x, y, item.StartTime, item.EndTime, overlayLabel)
+				filterComplex = append(filterComplex, overlayPart)
+				videoOverlays = append(videoOverlays, overlayLabel)
+
+				// Handle audio if not muted
+				if !item.IsMuted {
+					audioFilter := fmt.Sprintf("[%d:a]adelay=%dms:all=1[audio%d]", 
+						inputIndex, int(item.StartTime*1000), inputIndex)
+					filterComplex = append(filterComplex, audioFilter)
+					audioInputs = append(audioInputs, fmt.Sprintf("[audio%d]", inputIndex))
+				}
+			} else if item.Type == "image" {
+				// Scale and position image
+				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d];", inputIndex, w, h, inputIndex)
+				filterComplex = append(filterComplex, filterPart)
+				
+				// Overlay image on canvas
+				overlayLabel := fmt.Sprintf("overlay%d", inputIndex)
+				overlayPart := fmt.Sprintf("[%s][scaled%d]overlay=%d:%d:enable='between(t,%f,%f)'[%s]", 
+					videoOverlays[len(videoOverlays)-1], inputIndex, x, y, item.StartTime, item.EndTime, overlayLabel)
+				filterComplex = append(filterComplex, overlayPart)
+				videoOverlays = append(videoOverlays, overlayLabel)
+			}
+
+			inputIndex++
+		} else if item.Type == "text" {
+			// Add text overlay
+			escapedText := strings.ReplaceAll(item.Text, "'", "\\'")
+			textFilter := fmt.Sprintf("drawtext=text='%s':x=%d:y=%d:fontsize=%d:fontcolor=%s:enable='between(t,%f,%f)'",
+				escapedText, int(item.X), int(item.Y), int(item.FontSize), item.Color, item.StartTime, item.EndTime)
+			
+			// Apply text to the current overlay
+			if len(videoOverlays) > 0 {
+				overlayLabel := fmt.Sprintf("text_overlay%d", inputIndex)
+				textOverlay := fmt.Sprintf("[%s]%s[%s]", videoOverlays[len(videoOverlays)-1], textFilter, overlayLabel)
+				filterComplex = append(filterComplex, textOverlay)
+				videoOverlays[len(videoOverlays)-1] = overlayLabel
+			}
+		} else if item.Type == "audio" && !item.IsMuted {
+			// Handle standalone audio files
+			inputPath := strings.TrimPrefix(item.URL, "/")
+			if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+				log.Printf("Warning: Audio file does not exist: %s", inputPath)
+				continue
+			}
+
+			cmdArgs = append(cmdArgs, "-i", inputPath)
+			audioFilter := fmt.Sprintf("[%d:a]adelay=%dms:all=1[audio%d]", 
+				inputIndex, int(item.StartTime*1000), inputIndex)
+			filterComplex = append(filterComplex, audioFilter)
+			audioInputs = append(audioInputs, fmt.Sprintf("[audio%d]", inputIndex))
+			inputIndex++
+		}
+	}
+
+	// Mix audio inputs if any
+	if len(audioInputs) > 0 {
+		if len(audioInputs) == 1 {
+			filterComplex = append(filterComplex, fmt.Sprintf("%s[final_audio]", audioInputs[0]))
+		} else {
+			audioMix := fmt.Sprintf("%samix=inputs=%d[final_audio]", strings.Join(audioInputs, ""), len(audioInputs))
+			filterComplex = append(filterComplex, audioMix)
+		}
+	}
+
+	// Final output mapping
+	finalVideoLabel := videoOverlays[len(videoOverlays)-1]
+	
+	// Join filter complex
+	filterComplexStr := strings.Join(filterComplex, ";")
+	cmdArgs = append(cmdArgs, "-filter_complex", filterComplexStr)
+
+	// Map outputs
+	cmdArgs = append(cmdArgs, "-map", fmt.Sprintf("[%s]", finalVideoLabel))
+	if len(audioInputs) > 0 {
+		cmdArgs = append(cmdArgs, "-map", "[final_audio]")
+	}
+
+	// Set codec and quality based on settings
+	switch settings.Quality {
+	case "high":
+		cmdArgs = append(cmdArgs, "-c:v", "libx264", "-crf", "18")
+	case "medium":
+		cmdArgs = append(cmdArgs, "-c:v", "libx264", "-crf", "23")
+	case "low":
+		cmdArgs = append(cmdArgs, "-c:v", "libx264", "-crf", "28")
+	}
+
+	if len(audioInputs) > 0 {
+		cmdArgs = append(cmdArgs, "-c:a", "aac", "-b:a", "128k")
+	}
+
+	// Set duration and other parameters
+	cmdArgs = append(cmdArgs, "-t", fmt.Sprintf("%f", projectData.Duration))
+	cmdArgs = append(cmdArgs, "-r", "30") // Frame rate
+	cmdArgs = append(cmdArgs, "-y") // Overwrite output file
+	cmdArgs = append(cmdArgs, outputPath)
+
+	log.Printf("FFmpeg export command: ffmpeg %v", cmdArgs)
+
+	// Execute FFmpeg command
+	cmd := exec.Command("ffmpeg", cmdArgs...)
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("ffmpeg export failed: %v\nStdout: %s\nStderr: %s", err, out.String(), stderr.String())
+	}
+
+	log.Printf("FFmpeg export output: %s", out.String())
+	
+	// Return the URL for the exported file
+	exportURL := fmt.Sprintf("/uploads/%s/exports/%s", strings.Split(outputPath, "/")[1], filepath.Base(outputPath))
+	return exportURL, nil
 }

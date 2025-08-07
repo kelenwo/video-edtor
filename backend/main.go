@@ -5,6 +5,10 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"path/filepath"
+	"io"
+	"os"
+	"mime/multipart"
 
 	"video-editor/config"
 	"video-editor/db"
@@ -35,6 +39,11 @@ func main() {
 	}()
 	log.Println("Connected to MongoDB!")
 
+	// Create uploads directory if it doesn't exist
+	if err := os.MkdirAll("uploads", 0755); err != nil {
+		log.Fatalf("Failed to create uploads directory: %v", err)
+	}
+
 	// Initialize services
 	authService := services.NewAuthService(mongoClient, cfg.DBName)
 	projectService := services.NewProjectService(mongoClient, cfg.DBName)
@@ -51,6 +60,21 @@ func main() {
 
 	// Set up Gin router
 	router := gin.Default()
+
+	// Enable CORS for frontend development
+	router.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
+	// Serve static files (uploaded files)
+	router.Static("/uploads", "./uploads")
 
 	// --- Public Routes (Auth) ---
 	router.POST("/register", func(c *gin.Context) {
@@ -100,6 +124,57 @@ func main() {
 	authorized := router.Group("/")
 	authorized.Use(authMiddleware())
 	{
+		// File upload endpoint
+		authorized.POST("/upload", func(c *gin.Context) {
+			userID := c.GetString("user_id")
+			
+			// Parse multipart form
+			form, err := c.MultipartForm()
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form data"})
+				return
+			}
+			
+			files := form.File["files"]
+			if len(files) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "No files provided"})
+				return
+			}
+
+			var uploadedFiles []map[string]interface{}
+			
+			for _, file := range files {
+				// Create user-specific upload directory
+				userUploadDir := filepath.Join("uploads", userID)
+				if err := os.MkdirAll(userUploadDir, 0755); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user directory"})
+					return
+				}
+
+				// Generate unique filename
+				filename := fmt.Sprintf("%d_%s", time.Now().Unix(), file.Filename)
+				filepath := filepath.Join(userUploadDir, filename)
+
+				// Save file
+				if err := saveUploadedFile(file, filepath); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+					return
+				}
+
+				// Get file URL
+				fileURL := fmt.Sprintf("/uploads/%s/%s", userID, filename)
+				
+				uploadedFiles = append(uploadedFiles, map[string]interface{}{
+					"filename": file.Filename,
+					"url":      fileURL,
+					"size":     file.Size,
+					"type":     getFileType(file.Filename),
+				})
+			}
+
+			c.JSON(http.StatusOK, gin.H{"files": uploadedFiles})
+		})
+
 		// Projects
 		authorized.POST("/projects", func(c *gin.Context) {
 			userID := c.GetString("user_id") // Get user ID from JWT
@@ -125,6 +200,38 @@ func main() {
 				return
 			}
 			c.JSON(http.StatusOK, project)
+		})
+
+		// Video export endpoint
+		authorized.POST("/export", func(c *gin.Context) {
+			userID := c.GetString("user_id")
+			var req struct {
+				ProjectData map[string]interface{} `json:"projectData"`
+				Settings    map[string]interface{} `json:"settings"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Create export job
+			job := models.VideoProcessingJob{
+				UserID:    userID,
+				ProjectID: "", // No specific project ID for export
+				Action:    "export",
+				Params: map[string]interface{}{
+					"projectData": req.ProjectData,
+					"settings":    req.Settings,
+				},
+				Status:    "pending",
+				CreatedAt: time.Now(),
+			}
+
+			services.AddJobToQueue(job)
+			c.JSON(http.StatusAccepted, gin.H{
+				"message": "Export job submitted", 
+				"job_id": job.ID.Hex(),
+			})
 		})
 
 		// Video Processing Request
@@ -206,5 +313,38 @@ func authMiddleware() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			c.Abort()
 		}
+	}
+}
+
+// Helper function to save uploaded file
+func saveUploadedFile(file *multipart.FileHeader, dst string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, src)
+	return err
+}
+
+// Helper function to determine file type
+func getFileType(filename string) string {
+	ext := filepath.Ext(filename)
+	switch ext {
+	case ".mp4", ".avi", ".mov", ".mkv", ".webm":
+		return "video"
+	case ".mp3", ".wav", ".flac", ".aac":
+		return "audio"
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+		return "image"
+	default:
+		return "unknown"
 	}
 }

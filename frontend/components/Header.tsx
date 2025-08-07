@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { ArrowLeftIcon, ArrowRightIcon, UndoIcon, RedoIcon, SaveIcon, UserIcon, DownloadIcon } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../redux/hooks';
-import { selectProjectName, setProjectName } from '../redux/videoEditorSlice';
+import { selectProjectName, setProjectName, selectMediaItems, selectDuration } from '../redux/videoEditorSlice';
+import { ExportModal } from './ExportModal';
 
 export const Header = ({
   onBackToHome
@@ -12,7 +13,10 @@ export const Header = ({
 }) => {
   const dispatch = useAppDispatch();
   const projectName = useAppSelector(selectProjectName);
+  const mediaItems = useAppSelector(selectMediaItems);
+  const duration = useAppSelector(selectDuration);
   const [isEditing, setIsEditing] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const handleNameClick = () => {
     setIsEditing(true);
@@ -30,6 +34,10 @@ export const Header = ({
     if (e.key === 'Enter') {
       setIsEditing(false);
     }
+  };
+
+  const handleExportClick = () => {
+    setShowExportModal(true);
   };
 
   return (
@@ -89,13 +97,22 @@ export const Header = ({
             <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
               <UserIcon size={16} className="text-blue-600" />
             </div>
-            <button className="bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-600 flex items-center">
+            <button 
+              onClick={handleExportClick}
+              className="bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-600 flex items-center"
+            >
               <DownloadIcon size={16} className="mr-1" />
               Export
             </button>
           </div>
         </div>
       </div>
+      {showExportModal && (
+        <ExportModal
+          projectData={{ mediaItems, duration, aspectRatio: '16:9' }}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
     </header>
   );
 };

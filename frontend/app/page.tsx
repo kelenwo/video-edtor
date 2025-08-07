@@ -1,12 +1,14 @@
 'use client'
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { SearchIcon, PlusIcon, UserIcon, GridIcon, ListIcon, ClockIcon, StarIcon, SlidersIcon, HelpCircleIcon, BellIcon } from 'lucide-react';
+import { SearchIcon, PlusIcon, UserIcon, GridIcon, ListIcon, ClockIcon, StarIcon, SlidersIcon, HelpCircleIcon, BellIcon, LogOutIcon } from 'lucide-react';
 import { useAppSelector } from '../redux/hooks';
 import { selectProjects } from '../redux/projectsSlice';
 import { ProjectCard } from '../components/ProjectCard';
 import { CreateNewCard } from '../components/CreateNewCard';
+import { AuthModal } from '../components/AuthModal';
+import { apiService } from './services/api';
 
 const LandingPage = () => {
   const projects = useAppSelector(selectProjects);
@@ -14,13 +16,36 @@ const LandingPage = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTab, setSelectedTab] = useState<'home' | 'recent' | 'starred'>('home');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  useEffect(() => {
+    setIsAuthenticated(apiService.isAuthenticated());
+  }, []);
 
   const handleCreateNew = () => {
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
+      return;
+    }
     router.push('/editor/new');
   };
 
   const handleOpenProject = (projectId: string) => {
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
+      return;
+    }
     router.push(`/editor/${projectId}`);
+  };
+
+  const handleAuthenticated = () => {
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    apiService.logout();
+    setIsAuthenticated(false);
   };
 
   // Filter projects based on search term
@@ -53,9 +78,27 @@ const LandingPage = () => {
             <button className="p-2 rounded-full hover:bg-gray-100">
               <BellIcon size={20} className="text-gray-600" />
             </button>
-            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-              <UserIcon size={16} className="text-blue-600" />
-            </div>
+            {isAuthenticated ? (
+              <>
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                  <UserIcon size={16} className="text-blue-600" />
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 rounded-full hover:bg-gray-100"
+                  title="Logout"
+                >
+                  <LogOutIcon size={20} className="text-gray-600" />
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="bg-blue-500 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-600"
+              >
+                Sign In
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -179,6 +222,12 @@ const LandingPage = () => {
           )}
         </div>
       </main>
+      {showAuthModal && (
+        <AuthModal
+          onClose={() => setShowAuthModal(false)}
+          onAuthenticated={handleAuthenticated}
+        />
+      )}
     </div>
   );
 };

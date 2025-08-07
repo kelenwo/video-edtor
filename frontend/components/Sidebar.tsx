@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../redux/hooks';
 import { selectMediaItems, selectSelectedItemId, addMediaItem, updateMediaItem, setSelectedItemId, removeMediaItem } from '../redux/videoEditorSlice';
+import { apiService } from '../app/services/api';
 
 // Helper component for standardized control sections
 const ControlSection = ({ title, children }: { title: string, children: React.ReactNode }) => (
@@ -106,78 +107,89 @@ export const Sidebar = () => {
   };
 
   /**
-   * Corrected file upload handler.
-   * This function is based on the original, working implementation.
-   * It correctly gets the media duration and uses 'url' instead of 'src'.
+   * Enhanced file upload handler that uploads files to the backend server.
+   * The server handles file storage and returns URLs for the uploaded files.
    */
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    const file = files[0];
-    const fileType = file.type.split('/')[0];
-    const url = URL.createObjectURL(file);
+    try {
+      // Upload files to backend
+      const uploadedFiles = await apiService.uploadFiles(files);
+      
+      for (const uploadedFile of uploadedFiles) {
+        const fileType = uploadedFile.type;
+        const serverUrl = `http://localhost:8080${uploadedFile.url}`;
 
-    if (fileType === 'video') {
-      // Create a temporary video element to get the actual duration
-      const video = document.createElement('video');
-      video.src = url;
-      video.onloadedmetadata = () => {
-        console.log('Video loaded metadata. Duration:', video.duration); // Debug log
-        const newTrack = findAvailableTrack(0, video.duration); // Find available track
-        const newItem = {
-          type: 'video' as const,
-          name: file.name,
-          duration: video.duration,
-          startTime: 0,
-          endTime: video.duration,
-          track: newTrack, // Assign dynamic track
-          color: '#9d84e8',
-          url: url, // Use 'url' which the player component expects
-          isMuted: false
-        };
-        dispatch(addMediaItem(newItem));
-        setActiveItem('videos');
-      };
-    } else if (fileType === 'audio') {
-      // Create a temporary audio element to get the actual duration
-      const audio = document.createElement('audio');
-      audio.src = url;
-      audio.onloadedmetadata = () => {
-        console.log('Audio loaded metadata. Duration:', audio.duration); // Debug log
-        const newTrack = findAvailableTrack(0, audio.duration); // Find available track
-        const newItem = {
-          type: 'audio' as const,
-          name: file.name,
-          duration: audio.duration,
-          startTime: 0,
-          endTime: audio.duration,
-          track: newTrack, // Assign dynamic track
-          color: '#4caf50',
-          url: url, // Use 'url'
-          isMuted: false
-        };
-        dispatch(addMediaItem(newItem));
-        setActiveItem('audios');
-      };
-    } else if (fileType === 'image') {
-      const defaultImageDuration = 10; // Default duration for images
-      const newTrack = findAvailableTrack(0, defaultImageDuration); // Find available track
-      const newItem = {
-        type: 'image' as const,
-        name: file.name,
-        duration: defaultImageDuration,
-        startTime: 0,
-        endTime: defaultImageDuration,
-        track: newTrack, // Assign dynamic track
-        url: url, // Use 'url'
-        position: {
-          x: 50,
-          y: 50
+        if (fileType === 'video') {
+          // Create a temporary video element to get the actual duration
+          const video = document.createElement('video');
+          video.src = serverUrl;
+          video.crossOrigin = 'anonymous'; // Handle CORS for cross-origin requests
+          video.onloadedmetadata = () => {
+            console.log('Video loaded metadata. Duration:', video.duration);
+            const newTrack = findAvailableTrack(0, video.duration);
+            const newItem = {
+              type: 'video' as const,
+              name: uploadedFile.filename,
+              duration: video.duration,
+              startTime: 0,
+              endTime: video.duration,
+              track: newTrack,
+              color: '#9d84e8',
+              url: serverUrl, // Use server URL
+              isMuted: false
+            };
+            dispatch(addMediaItem(newItem));
+            setActiveItem('videos');
+          };
+        } else if (fileType === 'audio') {
+          // Create a temporary audio element to get the actual duration
+          const audio = document.createElement('audio');
+          audio.src = serverUrl;
+          audio.crossOrigin = 'anonymous';
+          audio.onloadedmetadata = () => {
+            console.log('Audio loaded metadata. Duration:', audio.duration);
+            const newTrack = findAvailableTrack(0, audio.duration);
+            const newItem = {
+              type: 'audio' as const,
+              name: uploadedFile.filename,
+              duration: audio.duration,
+              startTime: 0,
+              endTime: audio.duration,
+              track: newTrack,
+              color: '#4caf50',
+              url: serverUrl, // Use server URL
+              isMuted: false
+            };
+            dispatch(addMediaItem(newItem));
+            setActiveItem('audios');
+          };
+        } else if (fileType === 'image') {
+          const defaultImageDuration = 10; // Default duration for images
+          const newTrack = findAvailableTrack(0, defaultImageDuration);
+          const newItem = {
+            type: 'image' as const,
+            name: uploadedFile.filename,
+            duration: defaultImageDuration,
+            startTime: 0,
+            endTime: defaultImageDuration,
+            track: newTrack,
+            url: serverUrl, // Use server URL
+            position: {
+              x: 50,
+              y: 50
+            }
+          };
+          dispatch(addMediaItem(newItem));
+          setActiveItem('photos');
         }
-      };
-      dispatch(addMediaItem(newItem));
-      setActiveItem('photos');
+      }
+    } catch (error) {
+      console.error('File upload failed:', error);
+      // You could show a toast notification here
+      alert('File upload failed. Please try again.');
     }
 
     // Reset file input to allow uploading the same file again
