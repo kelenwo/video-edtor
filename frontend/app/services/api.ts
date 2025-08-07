@@ -36,7 +36,8 @@ class ApiService {
   private getUploadHeaders(): HeadersInit {
     const token = this.getAuthToken();
     return {
-      ...(token && { 'Authorization': `Bearer ${token}` })
+      // No auth headers needed for now
+      // ...(token && { 'Authorization': `Bearer ${token}` })
     };
   }
 
@@ -64,7 +65,7 @@ class ApiService {
   async exportVideo(projectData: ProjectData, settings: ExportSettings): Promise<{ jobId: string; message: string }> {
     const response = await fetch(`${API_BASE_URL}/export`, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: { 'Content-Type': 'application/json' }, // No auth needed for now
       body: JSON.stringify({
         projectData,
         settings,
@@ -113,13 +114,8 @@ class ApiService {
 
   // WebSocket connection for real-time updates
   connectWebSocket(onMessage: (message: string) => void): WebSocket | null {
-    const token = this.getAuthToken();
-    if (!token) {
-      console.error('No auth token available for WebSocket connection');
-      return null;
-    }
-
-    const ws = new WebSocket(`ws://localhost:8080/ws?token=${token}`);
+    // No auth required for now
+    const ws = new WebSocket(`ws://localhost:8080/ws`);
     
     ws.onopen = () => {
       console.log('WebSocket connected');

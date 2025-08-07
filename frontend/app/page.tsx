@@ -20,22 +20,18 @@ const LandingPage = () => {
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   useEffect(() => {
-    setIsAuthenticated(apiService.isAuthenticated());
+    // Temporarily disable authentication
+    setIsAuthenticated(true); // Always authenticated for now
+    // setIsAuthenticated(apiService.isAuthenticated());
   }, []);
 
   const handleCreateNew = () => {
-    if (!isAuthenticated) {
-      setShowAuthModal(true);
-      return;
-    }
+    // No auth check needed for now
     router.push('/editor/new');
   };
 
   const handleOpenProject = (projectId: string) => {
-    if (!isAuthenticated) {
-      setShowAuthModal(true);
-      return;
-    }
+    // No auth check needed for now
     router.push(`/editor/${projectId}`);
   };
 
@@ -78,27 +74,10 @@ const LandingPage = () => {
             <button className="p-2 rounded-full hover:bg-gray-100">
               <BellIcon size={20} className="text-gray-600" />
             </button>
-            {isAuthenticated ? (
-              <>
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                  <UserIcon size={16} className="text-blue-600" />
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 rounded-full hover:bg-gray-100"
-                  title="Logout"
-                >
-                  <LogOutIcon size={20} className="text-gray-600" />
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="bg-blue-500 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-600"
-              >
-                Sign In
-              </button>
-            )}
+            {/* Temporarily hide auth UI */}
+            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+              <UserIcon size={16} className="text-blue-600" />
+            </div>
           </div>
         </div>
       </header>

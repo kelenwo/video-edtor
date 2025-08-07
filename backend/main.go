@@ -120,60 +120,100 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"token": tokenString})
 	})
 
-	// --- Authenticated Routes ---
+	// --- File upload endpoint (temporarily no auth required) ---
+	router.POST("/upload", func(c *gin.Context) {
+		// Use a default user ID when no auth is present
+		userID := "default_user"
+		
+		// Parse multipart form
+		form, err := c.MultipartForm()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form data"})
+			return
+		}
+		
+		files := form.File["files"]
+		if len(files) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No files provided"})
+			return
+		}
+
+		var uploadedFiles []map[string]interface{}
+		
+		for _, file := range files {
+			// Create user-specific upload directory
+			userUploadDir := filepath.Join("uploads", userID)
+			if err := os.MkdirAll(userUploadDir, 0755); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user directory"})
+				return
+			}
+
+			// Generate unique filename
+			filename := fmt.Sprintf("%d_%s", time.Now().Unix(), file.Filename)
+			filepath := filepath.Join(userUploadDir, filename)
+
+			// Save file
+			if err := saveUploadedFile(file, filepath); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+				return
+			}
+
+			// Get file URL
+			fileURL := fmt.Sprintf("/uploads/%s/%s", userID, filename)
+			
+			uploadedFiles = append(uploadedFiles, map[string]interface{}{
+				"filename": file.Filename,
+				"url":      fileURL,
+				"size":     file.Size,
+				"type":     getFileType(file.Filename),
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{"files": uploadedFiles})
+	})
+
+	// --- Export endpoint (temporarily no auth required) ---
+	router.POST("/export", func(c *gin.Context) {
+		userID := "default_user"
+		var req struct {
+			ProjectData map[string]interface{} `json:"projectData"`
+			Settings    map[string]interface{} `json:"settings"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Create export job
+		job := models.VideoProcessingJob{
+			UserID:    userID,
+			ProjectID: "", // No specific project ID for export
+			Action:    "export",
+			Params: map[string]interface{}{
+				"projectData": req.ProjectData,
+				"settings":    req.Settings,
+			},
+			Status:    "pending",
+			CreatedAt: time.Now(),
+		}
+
+		services.AddJobToQueue(job)
+		c.JSON(http.StatusAccepted, gin.H{
+			"message": "Export job submitted", 
+			"job_id": job.ID.Hex(),
+		})
+	})
+
+	// --- WebSocket endpoint (temporarily no auth required) ---
+	router.GET("/ws", func(c *gin.Context) {
+		userID := "default_user"
+		websocket.ServeWs(hub, c.Writer, c.Request, userID)
+	})
+
+	// --- Authenticated Routes (for when you want to add auth back) ---
 	authorized := router.Group("/")
 	authorized.Use(authMiddleware())
 	{
-		// File upload endpoint
-		authorized.POST("/upload", func(c *gin.Context) {
-			userID := c.GetString("user_id")
-			
-			// Parse multipart form
-			form, err := c.MultipartForm()
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form data"})
-				return
-			}
-			
-			files := form.File["files"]
-			if len(files) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "No files provided"})
-				return
-			}
-
-			var uploadedFiles []map[string]interface{}
-			
-			for _, file := range files {
-				// Create user-specific upload directory
-				userUploadDir := filepath.Join("uploads", userID)
-				if err := os.MkdirAll(userUploadDir, 0755); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user directory"})
-					return
-				}
-
-				// Generate unique filename
-				filename := fmt.Sprintf("%d_%s", time.Now().Unix(), file.Filename)
-				filepath := filepath.Join(userUploadDir, filename)
-
-				// Save file
-				if err := saveUploadedFile(file, filepath); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
-					return
-				}
-
-				// Get file URL
-				fileURL := fmt.Sprintf("/uploads/%s/%s", userID, filename)
-				
-				uploadedFiles = append(uploadedFiles, map[string]interface{}{
-					"filename": file.Filename,
-					"url":      fileURL,
-					"size":     file.Size,
-					"type":     getFileType(file.Filename),
-				})
-			}
-
-			c.JSON(http.StatusOK, gin.H{"files": uploadedFiles})
-		})
 
 		// Projects
 		authorized.POST("/projects", func(c *gin.Context) {
@@ -202,37 +242,7 @@ func main() {
 			c.JSON(http.StatusOK, project)
 		})
 
-		// Video export endpoint
-		authorized.POST("/export", func(c *gin.Context) {
-			userID := c.GetString("user_id")
-			var req struct {
-				ProjectData map[string]interface{} `json:"projectData"`
-				Settings    map[string]interface{} `json:"settings"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
 
-			// Create export job
-			job := models.VideoProcessingJob{
-				UserID:    userID,
-				ProjectID: "", // No specific project ID for export
-				Action:    "export",
-				Params: map[string]interface{}{
-					"projectData": req.ProjectData,
-					"settings":    req.Settings,
-				},
-				Status:    "pending",
-				CreatedAt: time.Now(),
-			}
-
-			services.AddJobToQueue(job)
-			c.JSON(http.StatusAccepted, gin.H{
-				"message": "Export job submitted", 
-				"job_id": job.ID.Hex(),
-			})
-		})
 
 		// Video Processing Request
 		authorized.POST("/process-video", func(c *gin.Context) {
@@ -261,11 +271,7 @@ func main() {
 			c.JSON(http.StatusAccepted, gin.H{"message": "Video processing job submitted", "job_id": job.ID.Hex()})
 		})
 
-		// WebSocket endpoint
-		authorized.GET("/ws", func(c *gin.Context) {
-			userID := c.GetString("user_id") // Get user ID from JWT
-			websocket.ServeWs(hub, c.Writer, c.Request, userID)
-		})
+
 	}
 
 	log.Printf("Server starting on port %s", cfg.Port)
