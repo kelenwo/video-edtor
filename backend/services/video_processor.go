@@ -330,7 +330,9 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 	height, _ := strconv.Atoi(resParts[1])
 
 	// Create blank canvas
-	filterComplex = append(filterComplex, fmt.Sprintf("color=black:%dx%d:d=%f[base]", width, height, projectData.Duration))
+	baseFilter := fmt.Sprintf("color=black:%dx%d:d=%f[base]", width, height, projectData.Duration)
+	filterComplex = append(filterComplex, baseFilter)
+	log.Printf("Base filter: %s", baseFilter)
 
 	inputIndex := 0
 	videoOverlays := []string{"base"}
@@ -369,14 +371,16 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 
 			if item.Type == "video" {
 				// Scale and position video
-				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d];", inputIndex, w, h, inputIndex)
+				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d]", inputIndex, w, h, inputIndex)
 				filterComplex = append(filterComplex, filterPart)
+				log.Printf("Added video scale filter: %s", filterPart)
 
 				// Overlay video on canvas
 				overlayLabel := fmt.Sprintf("overlay%d", inputIndex)
 				overlayPart := fmt.Sprintf("[%s][scaled%d]overlay=%d:%d:enable='between(t,%f,%f)'[%s]",
 					videoOverlays[len(videoOverlays)-1], inputIndex, x, y, item.StartTime, item.EndTime, overlayLabel)
 				filterComplex = append(filterComplex, overlayPart)
+				log.Printf("Added video overlay filter: %s", overlayPart)
 				videoOverlays = append(videoOverlays, overlayLabel)
 
 				// Handle audio if not muted
@@ -388,7 +392,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 				}
 			} else if item.Type == "image" {
 				// Scale and position image
-				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d];", inputIndex, w, h, inputIndex)
+				filterPart := fmt.Sprintf("[%d:v]scale=%d:%d[scaled%d]", inputIndex, w, h, inputIndex)
 				filterComplex = append(filterComplex, filterPart)
 
 				// Overlay image on canvas
@@ -487,6 +491,7 @@ func (vp *VideoProcessor) buildComplexFFmpegCommand(projectData struct {
 
 		// Join filter complex
 		filterComplexStr := strings.Join(filterComplex, ";")
+		log.Printf("Generated filter complex: %s", filterComplexStr)
 		cmdArgs = append(cmdArgs, "-filter_complex", filterComplexStr)
 
 		// Map outputs
